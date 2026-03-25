@@ -1,11 +1,11 @@
+@file:OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+
 package com.example.pscmaster.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -39,7 +38,6 @@ import com.example.pscmaster.ui.viewmodel.QuizUiState
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
     viewModel: QuizViewModel,
@@ -101,6 +99,11 @@ fun QuizContent(uiState: QuizUiState, viewModel: QuizViewModel) {
     val pagerState = rememberPagerState(pageCount = { uiState.questions.size })
     val scope = rememberCoroutineScope()
     
+    // Sync UI state back to ViewModel when page changes
+    LaunchedEffect(pagerState.currentPage) {
+        viewModel.updateCurrentPage(pagerState.currentPage)
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         val progress by animateFloatAsState(
             targetValue = if (uiState.questions.isNotEmpty()) (pagerState.currentPage + 1).toFloat() / uiState.questions.size else 0f,
@@ -260,183 +263,162 @@ fun QuestionPage(
             }
         }
 
-        // 2. Question Area (Flexible Weight)
+        // 2. Scrollable Content Area (Question + Options)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-            ) {
-                Text(
-                    text = question.questionText,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = baseFontSize,
-                        lineHeight = (baseFontSize.value * 1.4).sp
-                    ),
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
+            // Question + AI Variation
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ) {
+                    Text(
+                        text = question.questionText,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = baseFontSize,
+                            lineHeight = (baseFontSize.value * 1.4).sp
+                        ),
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
 
-            if (isAiVariationEnabled) {
-                if (aiVariation != null) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                if (isAiVariationEnabled) {
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(6.dp))
-                                Text("AI REPHRASED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.AutoAwesome, 
+                                        contentDescription = null, 
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.tertiary
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "AI REPHRASED VERSION", 
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                
+                                if (isLoadingVariation) {
+                                    Box(modifier = Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    }
+                                } else if (aiVariation != null) {
+                                    Text(
+                                        text = aiVariation,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                            lineHeight = 20.sp
+                                        )
+                                    )
+                                } else {
+                                    TextButton(
+                                        onClick = onGenerateVariation,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)
+                                    ) {
+                                        Text("Generate Variation", style = MaterialTheme.typography.labelLarge)
+                                    }
+                                }
                             }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = aiVariation,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = (baseFontSize.value - 2).sp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                            )
                         }
                     }
-                } else if (!isAnswered) {
-                    OutlinedButton(
-                        onClick = onGenerateVariation,
-                        modifier = Modifier.fillMaxWidth().height(40.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = !isLoadingVariation
+                }
+            }
+
+            // Options
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                question.options.forEachIndexed { index, option ->
+                    val isCorrect = index == question.correctIndex
+                    val isSelected = index == selectedOption
+                    
+                    val backgroundColor = when {
+                        isAnswered && isCorrect -> SuccessGreen.copy(alpha = 0.15f)
+                        isSelected && !isCorrect -> ErrorRed.copy(alpha = 0.15f)
+                        isSelected -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.surface
+                    }
+                    
+                    val borderColor = when {
+                        isAnswered && isCorrect -> SuccessGreen
+                        isSelected && !isCorrect -> ErrorRed
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    }
+
+                    Surface(
+                        onClick = { if (!isAnswered) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAnswerSelected(index)
+                        } },
+                        enabled = !isAnswered,
+                        shape = RoundedCornerShape(12.dp),
+                        color = backgroundColor,
+                        border = androidx.compose.foundation.BorderStroke(if (isSelected || (isAnswered && isCorrect)) 2.dp else 1.dp, borderColor)
                     ) {
-                        if (isLoadingVariation) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("SHOW AI VARIATION", style = MaterialTheme.typography.labelMedium)
+                        Row(
+                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isSelected || (isAnswered && isCorrect)) borderColor else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (isAnswered && isCorrect) {
+                                        Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp), tint = Color.White)
+                                    } else if (isSelected && !isCorrect) {
+                                        Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp), tint = Color.White)
+                                    } else {
+                                        Text(
+                                            text = ('A' + index).toString(),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                text = option,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (isSelected || (isAnswered && isCorrect)) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        // 3. Options Area (Fixed)
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(bottom = if (isLastPage && isAnswered) 8.dp else 0.dp)
-        ) {
-            question.options.forEachIndexed { index, option ->
-                val isCorrect = index == question.correctIndex
-                val isUserSelected = selectedOption == index
-                
-                QuizOptionItem(
-                    text = option,
-                    index = index,
-                    isAnswered = isAnswered,
-                    isCorrect = isCorrect,
-                    isUserSelected = isUserSelected,
-                    fontSize = (baseFontSize.value - 1).sp,
-                    onClick = {
-                        if (!isAnswered) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onAnswerSelected(index)
-                        }
-                    }
-                )
-            }
-        }
-
-        // 4. Finish Session Button
-        if (isLastPage && (isAnswered || isSkipped)) {
-            Spacer(Modifier.height(12.dp))
+        // 3. Bottom Action (Fixed)
+        if (isLastPage && isAnswered) {
             Button(
                 onClick = onFinish,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(56.dp),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                Text("FINISH SESSION", style = MaterialTheme.typography.labelLarge)
+                Text("VIEW RESULTS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
-        }
-    }
-}
-
-@Composable
-fun QuizOptionItem(
-    text: String,
-    index: Int,
-    isAnswered: Boolean,
-    isCorrect: Boolean,
-    isUserSelected: Boolean,
-    fontSize: androidx.compose.ui.unit.TextUnit,
-    onClick: () -> Unit
-) {
-    val containerColor = when {
-        isAnswered && isCorrect -> SuccessGreen.copy(alpha = 0.12f)
-        isAnswered && isUserSelected && !isCorrect -> ErrorRed.copy(alpha = 0.12f)
-        isUserSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-        else -> MaterialTheme.colorScheme.surface
-    }
-    
-    val borderColor = when {
-        isAnswered && isCorrect -> SuccessGreen
-        isAnswered && isUserSelected && !isCorrect -> ErrorRed
-        isUserSelected -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-    }
-
-    // High-contrast and bright colors for the letter indicators
-    val letterBgColor = when {
-        isAnswered && isCorrect -> SuccessGreen
-        isAnswered && isUserSelected && !isCorrect -> ErrorRed
-        isUserSelected -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) // Brighter idle state
-    }
-
-    val letterTextColor = when {
-        isAnswered && isCorrect || isAnswered && isUserSelected && !isCorrect || isUserSelected -> Color.White
-        else -> Color.White // Keeping it white on a bright background for pop
-    }
-
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = containerColor,
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(letterBgColor),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = ('A' + index).toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = letterTextColor,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium.copy(fontSize = fontSize),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = if (isUserSelected) FontWeight.Bold else FontWeight.Normal
-            )
         }
     }
 }
@@ -445,19 +427,14 @@ fun QuizOptionItem(
 fun EmptyQuizState(onBack: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("UP TO DATE!", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "No questions found or scheduled for now. Add some questions to begin!",
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        OutlinedButton(onClick = onBack) {
+        Icon(Icons.Default.QuestionMark, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.secondary)
+        Spacer(Modifier.height(24.dp))
+        Text("No questions found for the selected subjects.", textAlign = TextAlign.Center)
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onBack) {
             Text("GO BACK")
         }
     }
@@ -465,34 +442,25 @@ fun EmptyQuizState(onBack: () -> Unit) {
 
 @Composable
 fun QuizResultView(score: Int, total: Int, answeredCount: Int, onBack: () -> Unit) {
-    val percentage = if (answeredCount > 0) (score.toFloat() / answeredCount * 100).toInt() else 0
-    
-    val (emoji, message) = when {
-        percentage >= 90 -> "🏆" to "Outstanding! You're well prepared!"
-        percentage >= 70 -> "🎯" to "Great job! Keep up the momentum!"
-        percentage >= 50 -> "📚" to "Good effort! Review weak areas."
-        percentage >= 30 -> "💪" to "Keep practicing, you'll improve!"
-        else -> "🔄" to "Time to revisit the basics."
+    val percentage = if (total > 0) (score * 100) / total else 0
+    val (message, emoji) = when {
+        percentage >= 90 -> "Excellent!" to "🏆"
+        percentage >= 75 -> "Great job!" to "🌟"
+        percentage >= 50 -> "Good effort" to "👍"
+        else -> "Keep practicing" to "📚"
     }
-    
+
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Box(modifier = Modifier.size(180.dp), contentAlignment = Alignment.Center) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(200.dp)) {
             CircularProgressIndicator(
-                progress = { 1f },
+                progress = { percentage / 100f },
                 modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
                 strokeWidth = 12.dp,
-                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-            )
-            CircularProgressIndicator(
-                progress = { if (answeredCount > 0) score.toFloat() / answeredCount else 0f },
-                modifier = Modifier.fillMaxSize(),
-                color = if (percentage >= 50) SuccessGreen else ErrorRed,
-                strokeWidth = 12.dp,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -745,20 +713,4 @@ fun ConfigCard(
             )
         }
     }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun FlowRow(
-    modifier: Modifier = Modifier,
-    horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
-    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
-    content: @Composable () -> Unit
-) {
-    androidx.compose.foundation.layout.FlowRow(
-        modifier = modifier,
-        horizontalArrangement = horizontalArrangement,
-        verticalArrangement = verticalArrangement,
-        content = { content() }
-    )
 }

@@ -1,5 +1,6 @@
 package com.example.pscmaster.ui.screens
 
+import android.app.Activity
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +52,27 @@ fun HomeScreen(
         uri?.let {
             viewModel.importDatabase(it)
         }
+    }
+
+    if (uiState.needsRestart) {
+        AlertDialog(
+            onDismissRequest = { /* Prevent dismiss */ },
+            title = { Text("Import Successful") },
+            text = { Text("The database has been imported. The app needs to restart to apply changes.", textAlign = TextAlign.Center) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val activity = context as? Activity
+                        activity?.finish()
+                        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                        intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Text("RESTART NOW")
+                }
+            }
+        )
     }
 
     Scaffold(

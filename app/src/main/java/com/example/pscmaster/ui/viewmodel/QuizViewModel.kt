@@ -51,6 +51,10 @@ class QuizViewModel @Inject constructor(
         _configState.value = _configState.value.copy(isAiVariationEnabled = enabled)
     }
 
+    fun updateCurrentPage(index: Int) {
+        _uiState.value = _uiState.value.copy(currentQuestionIndex = index)
+    }
+
     fun generateAiVariation(questionIndex: Int) {
         val currentQuestions = _uiState.value.questions
         val question = currentQuestions.getOrNull(questionIndex) ?: return
@@ -111,7 +115,8 @@ class QuizViewModel @Inject constructor(
                 answeredIndices = mutableMapOf(),
                 skippedIndices = emptySet(),
                 score = 0,
-                isQuizFinished = false
+                isQuizFinished = false,
+                currentQuestionIndex = 0
             )
         }
     }

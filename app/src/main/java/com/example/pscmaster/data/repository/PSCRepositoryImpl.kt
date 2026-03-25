@@ -22,6 +22,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+import com.github.doyaaaaaken.kotlincsv.dsl.csvReader
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
@@ -44,6 +46,7 @@ class PSCRepositoryImpl @Inject constructor(
     private val dbName = "psc_master_db"
     private val secureRandom = SecureRandom()
     private val prefs = context.getSharedPreferences("ai_cache_prefs", Context.MODE_PRIVATE)
+    private val syncPrefs = context.getSharedPreferences("sync_prefs", Context.MODE_PRIVATE)
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var syncListenerRegistration: ListenerRegistration? = null
 
@@ -181,30 +184,21 @@ class PSCRepositoryImpl @Inject constructor(
         val questionsToInsert = mutableListOf<Question>()
         try {
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream), 8 * 1024).use { reader ->
-                    // Skip header if it exists
-                    var line = reader.readLine()
-                    if (line != null && line.contains("subject", ignoreCase = true)) {
-                        line = reader.readLine()
+                csvReader().readAll(inputStream).forEachIndexed { index, row ->
+                    // Skip header if it exists and this is the first row
+                    if (index == 0 && row.any { it.contains("subject", ignoreCase = true) }) {
+                        return@forEachIndexed
                     }
-
-                    val regex = ",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)".toRegex()
-                    while (line != null) {
-                        if (line.isNotBlank()) {
-                            val parts = line.split(regex).map { it.replace("^\"|\"$".toRegex(), "").trim() }
-                            
-                            if (parts.size >= 7) {
-                                questionsToInsert.add(
-                                    Question(
-                                        subject = parts[0],
-                                        questionText = parts[1],
-                                        options = listOf(parts[2], parts[3], parts[4], parts[5]),
-                                        correctIndex = (parts[6].toIntOrNull() ?: 0).coerceIn(0, 3)
-                                    )
-                                )
-                            }
-                        }
-                        line = reader.readLine()
+                    
+                    if (row.size >= 7) {
+                        questionsToInsert.add(
+                            Question(
+                                subject = row[0].trim(),
+                                questionText = row[1].trim(),
+                                options = listOf(row[2].trim(), row[3].trim(), row[4].trim(), row[5].trim()),
+                                correctIndex = (row[6].trim().toIntOrNull() ?: 0).coerceIn(0, 3)
+                            )
+                        )
                     }
                 }
             }
@@ -345,8 +339,8 @@ class PSCRepositoryImpl @Inject constructor(
                     input.copyTo(output)
                 }
             }
-            // Note: Room singleton is now closed. The app must be restarted
-            // to reinitialize the database connection.
+            // Reset sync timestamp on new DB import
+            syncPrefs.edit().putLong("last_sync_timestamp", 0L).apply()
         } catch (e: Exception) {
             Log.e("PSCRepository", "Database import failed", e)
         }
@@ -366,7 +360,10 @@ class PSCRepositoryImpl @Inject constructor(
             }
 
             withTimeout(60000L) {
-                val localQuestions = questionDao.getAllQuestionsList()
+                // 1. Upload local changes (anything newer than last sync)
+                val lastSync = syncPrefs.getLong("last_sync_timestamp", 0L)
+                val localQuestions = questionDao.getAllQuestionsList().filter { it.timestamp > lastSync }
+                
                 if (localQuestions.isNotEmpty()) {
                     val chunks = localQuestions.chunked(400)
                     chunks.forEach { chunk ->
@@ -380,13 +377,27 @@ class PSCRepositoryImpl @Inject constructor(
                     }
                 }
 
-                val remoteQuestions = firestore.collection("shared_questions").get().await()
+                // 2. Fetch remote changes (anything newer than last sync)
+                val remoteQuery = firestore.collection("shared_questions")
+                    .whereGreaterThan("timestamp", lastSync)
+                    .orderBy("timestamp", Query.Direction.ASCENDING)
+                
+                val remoteQuestions = remoteQuery.get().await()
                 remoteQuestions.documents.forEach { doc ->
                     val question = doc.toObject(Question::class.java)
                     if (question != null) {
-                        questionDao.insertQuestion(question.copy(id = 0))
+                        // Use insert with IGNORE or handle update
+                        val existing = questionDao.getQuestionByText(question.questionText)
+                        if (existing == null) {
+                            questionDao.insertQuestion(question.copy(id = 0))
+                        } else if (question.timestamp > existing.timestamp) {
+                            questionDao.updateQuestion(question.copy(id = existing.id))
+                        }
                     }
                 }
+                
+                // Update sync timestamp to now
+                syncPrefs.edit().putLong("last_sync_timestamp", System.currentTimeMillis()).apply()
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -396,7 +407,7 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override fun startRealtimeSync() {
-        // Remove any existing listener before adding a new one
+        // Real-time sync handles immediate updates, we still keep it but now our manual sync is efficient
         syncListenerRegistration?.remove()
         syncListenerRegistration = firestore.collection("shared_questions")
             .addSnapshotListener { snapshots, e ->
@@ -419,11 +430,14 @@ class PSCRepositoryImpl @Inject constructor(
                                     if (question != null) {
                                         val local = questionDao.getQuestionByText(question.questionText)
                                         if (local != null) {
-                                            questionDao.updateQuestion(local.copy(
-                                                options = question.options,
-                                                correctIndex = question.correctIndex,
-                                                subject = question.subject
-                                            ))
+                                            if (question.timestamp > local.timestamp) {
+                                                questionDao.updateQuestion(local.copy(
+                                                    options = question.options,
+                                                    correctIndex = question.correctIndex,
+                                                    subject = question.subject,
+                                                    timestamp = question.timestamp
+                                                ))
+                                            }
                                         } else {
                                             questionDao.insertQuestion(question.copy(id = 0))
                                         }

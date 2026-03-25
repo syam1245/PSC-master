@@ -22,6 +22,7 @@ googleGmsGoogleServices = "4.4.4"
 googleFirebaseCrashlytics = "3.0.6"
 coroutines = "1.9.0"
 mockk = "1.13.8"
+kotlinCsv = "1.10.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -57,6 +58,7 @@ firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashly
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlin-csv = { group = "com.github.doyaaaaaken", name = "kotlin-csv-jvm", version.ref = "kotlinCsv" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
