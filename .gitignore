@@ -1,0 +1,38 @@
+# ============================================================
+# PSCmaster .gitignore
+# ============================================================
+
+# ---------- Built / generated outputs ----------
+*.iml
+.gradle/
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# ---------- IDE-specific ----------
+.idea/
+.kotlin/
+
+# ---------- OS-specific ----------
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ---------- API Keys & Secrets ----------
+# local.properties holds SDK path + API keys (Gemini, Groq, etc.)
+local.properties
+
+# Firebase config — contains project API key & identifiers
+app/google-services.json
+
+# Keystore files (signing keys)
+*.jks
+*.keystore
+keystore.properties
+
+# ---------- Misc ----------
+*.hprof
+*.log

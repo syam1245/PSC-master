@@ -1,0 +1,25 @@
+## ============================================================
+## local.properties.example
+## ============================================================
+## Copy this file to "local.properties" and fill in your own values.
+##
+##   cp local.properties.example local.properties   (macOS / Linux)
+##   copy local.properties.example local.properties  (Windows)
+##
+## ⚠️  NEVER commit local.properties to version control!
+## ============================================================
+
+# ---- Android SDK path (auto-populated by Android Studio) ----
+# sdk.dir=/path/to/your/Android/Sdk
+# On Windows it typically looks like:
+# sdk.dir=C\:\\Users\\YourUsername\\AppData\\Local\\Android\\Sdk
+
+# ---- Gemini API Key ----
+# Used for AI-powered question generation via Google Gemini.
+# Get yours at: https://aistudio.google.com/app/apikey
+gemini.api.key=YOUR_GEMINI_API_KEY_HERE
+
+# ---- Groq API Key ----
+# Used as a fallback AI provider via Groq Cloud.
+# Get yours at: https://console.groq.com/keys
+groq.api.key=YOUR_GROQ_API_KEY_HERE
