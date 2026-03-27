@@ -40,7 +40,15 @@ interface PerformanceDao {
         ORDER BY count DESC
     """)
     fun getWeakSubjects(): Flow<List<SubjectCount>>
+
+    @Query("SELECT COUNT(CASE WHEN isCorrect = 1 THEN 1 END) as correct, COUNT(*) as total FROM user_performance WHERE timestamp >= :since")
+    fun getWeeklyStats(since: Long): Flow<WeeklyStats>
 }
+
+data class WeeklyStats(
+    val correct: Int,
+    val total: Int
+)
 
 data class SubjectCount(
     val subject: String,

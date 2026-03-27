@@ -15,7 +15,7 @@ import com.example.pscmaster.data.entity.*
         QuestionBadgeState::class,
         UserPerformanceMetrics::class
     ],
-    version = 7,
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -35,7 +35,6 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Delete existing duplicates before creating the unique index to avoid migration failure
                 db.execSQL("""
                     DELETE FROM questions 
                     WHERE id NOT IN (
@@ -44,10 +43,10 @@ abstract class AppDatabase : RoomDatabase() {
                         GROUP BY questionText
                     )
                 """.trimIndent())
-                
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_questions_questionText ON questions (questionText)")
             }
         }
+
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_questions_subject ON questions (subject)")
@@ -69,7 +68,6 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Table: quiz_sessions
                 db.execSQL("""
                     CREATE TABLE IF NOT EXISTS quiz_sessions (
                         sessionId TEXT NOT NULL PRIMARY KEY,
@@ -79,8 +77,6 @@ abstract class AppDatabase : RoomDatabase() {
                         subjectFilter TEXT
                     )
                 """.trimIndent())
-
-                // Table: question_badge_state
                 db.execSQL("""
                     CREATE TABLE IF NOT EXISTS question_badge_state (
                         questionId INTEGER NOT NULL PRIMARY KEY,
@@ -90,8 +86,6 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_badge_state ON question_badge_state (state)")
-
-                // Table: user_performance_metrics
                 db.execSQL("""
                     CREATE TABLE IF NOT EXISTS user_performance_metrics (
                         questionId INTEGER NOT NULL PRIMARY KEY,
@@ -103,6 +97,28 @@ abstract class AppDatabase : RoomDatabase() {
                         consecutiveCorrect INTEGER NOT NULL DEFAULT 0,
                         FOREIGN KEY(questionId) REFERENCES questions(id) ON DELETE CASCADE
                     )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE questions ADD COLUMN subjectTag TEXT NOT NULL DEFAULT ''")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_questions_subjectTag ON questions (subjectTag)")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Robust cleanup for any variation of "AI POOL (Topic)"
+                db.execSQL("""
+                    UPDATE questions 
+                    SET subjectTag = TRIM(REPLACE(REPLACE(REPLACE(REPLACE(subject, 'AI POOL (', ''), 'AI pool (', ''), 'AI Pool (', ''), ')', '')),
+                        subject = 'AI POOL'
+                    WHERE subject LIKE 'AI POOL (%)' 
+                       OR subject LIKE 'AI pool (%)' 
+                       OR subject LIKE 'AI Pool (%)'
+                       OR subject LIKE 'ai pool (%)'
                 """.trimIndent())
             }
         }

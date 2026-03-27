@@ -33,6 +33,7 @@ class AnalyticsViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(
                             insights = cachedResult.insights,
                             provider = cachedResult.provider,
+                            subjectStats = weakSubjects,
                             isLoading = false
                         )
                         return@launch
@@ -49,6 +50,7 @@ class AnalyticsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(
                     insights = result.insights,
                     provider = result.provider,
+                    subjectStats = weakSubjects,
                     isLoading = false
                 )
             } catch (e: Exception) {
@@ -65,5 +67,6 @@ class AnalyticsViewModel @Inject constructor(
 data class AnalyticsUiState(
     val insights: String = "",
     val provider: String = "",
+    val subjectStats: List<com.example.pscmaster.data.local.SubjectCount> = emptyList(),
     val isLoading: Boolean = false
 )

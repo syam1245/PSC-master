@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.example.pscmaster.data.entity.Question
 import com.example.pscmaster.ui.theme.SuccessGreen
 import com.example.pscmaster.ui.theme.ErrorRed
+import com.example.pscmaster.ui.theme.getSubjectColor
 import com.example.pscmaster.ui.viewmodel.QuizViewModel
 import com.example.pscmaster.ui.viewmodel.PracticeConfig
 import com.example.pscmaster.ui.viewmodel.QuizUiState
@@ -189,23 +190,6 @@ fun QuizContent(uiState: QuizUiState, viewModel: QuizViewModel) {
     }
 }
 
-fun getSubjectColor(subject: String): Color {
-    val hash = subject.hashCode().absoluteValue
-    val colors = listOf(
-        Color(0xFFE57373), // Red
-        Color(0xFF81C784), // Green
-        Color(0xFF64B5F6), // Blue
-        Color(0xFFFFD54F), // Amber
-        Color(0xFFBA68C8), // Purple
-        Color(0xFF4DB6AC), // Teal
-        Color(0xFFFF8A65), // Deep Orange
-        Color(0xFFAED581), // Light Green
-        Color(0xFF9575CD), // Deep Purple
-        Color(0xFF7986CB)  // Indigo
-    )
-    return colors[hash % colors.size]
-}
-
 @Composable
 fun QuestionPage(
     question: Question,
@@ -341,24 +325,31 @@ fun QuestionPage(
                                 Spacer(Modifier.height(8.dp))
                                 
                                 if (isLoadingVariation) {
-                                    Box(modifier = Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
-                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    Box(modifier = Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                                     }
                                 } else if (aiVariation != null) {
                                     Text(
                                         text = aiVariation,
                                         style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
                                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                             lineHeight = 20.sp
-                                        )
+                                        ),
+                                        modifier = Modifier.padding(top = 4.dp)
                                     )
                                 } else {
+                                    // Manual Generate Button
                                     TextButton(
                                         onClick = onGenerateVariation,
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.tertiary
+                                        )
                                     ) {
-                                        Text("Generate Variation", style = MaterialTheme.typography.labelLarge)
+                                        Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("REPHRASE WITH AI", style = MaterialTheme.typography.labelLarge)
                                     }
                                 }
                             }

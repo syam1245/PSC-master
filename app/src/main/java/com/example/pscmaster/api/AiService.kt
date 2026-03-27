@@ -9,6 +9,12 @@ data class AiResult(
 
 interface AiService {
     suspend fun analyzePerformance(weakSubjects: List<SubjectCount>): AiResult
-    suspend fun generateVariation(question: String, correctAnswer: String): AiResult
+    suspend fun generateVariation(
+        question: String,
+        options: List<String>,
+        correctIndex: Int,
+        subject: String = "General",
+        difficulty: String = "medium"
+    ): AiResult
     suspend fun generateNewQuestions(subject: String, count: Int): AiResult
 }

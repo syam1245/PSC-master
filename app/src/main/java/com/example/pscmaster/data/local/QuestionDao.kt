@@ -73,4 +73,12 @@ interface QuestionDao {
     @Transaction
     @Query("SELECT * FROM questions WHERE subject = :subject")
     suspend fun getQuestionsWithMetadataBySubject(subject: String): List<QuestionWithMetadata>
+
+    @Transaction
+    @Query("""
+        SELECT * FROM questions 
+        WHERE id IN (SELECT questionId FROM user_performance_metrics WHERE correctAttempts < totalAttempts)
+        ORDER BY timestamp DESC
+    """)
+    suspend fun getQuestionsWithMistakes(): List<QuestionWithMetadata>
 }

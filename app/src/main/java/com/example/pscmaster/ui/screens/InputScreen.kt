@@ -452,7 +452,7 @@ fun GeneratedQuestionsDialog(
                             Column(modifier = Modifier.padding(start = 4.dp)) {
                                 Text(text = question.question, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                                 Text(
-                                    text = "Correct: ${question.options.getOrElse(question.correctIndex) { "?" }}",
+                                    text = "Correct: ${question.options[question.correct_option] ?: "?"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )

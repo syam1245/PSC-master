@@ -61,6 +61,11 @@ class InputViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(weakSubjects = weak)
             }
         }
+        viewModelScope.launch {
+            repository.getWeeklyProgress().collectLatest { stats ->
+                _uiState.value = _uiState.value.copy(weeklyStats = stats)
+            }
+        }
         checkAuthStatus()
     }
 
@@ -331,37 +336,70 @@ class InputViewModel @Inject constructor(
     }
 
     fun saveSelectedQuestions(indices: Set<Int>) {
+        if (indices.isEmpty()) return
+        
         val questions = _uiState.value.generatedQuestions
-        val subject = _uiState.value.subject
+        val originalSubject = _uiState.value.subject
+        val aiPoolSubject = "AI POOL (${originalSubject.ifBlank { "Misc" }})"
         
         viewModelScope.launch {
-            var addedCount = 0
-            indices.forEach { index ->
-                if (index in questions.indices) {
-                    val gen = questions[index]
-                    val safeOptions = gen.options.map { it.trim() }
-                    val success = repository.addQuestion(
-                        Question(
-                            subject = subject,
+            try {
+                _uiState.value = _uiState.value.copy(isSyncing = true) // Show a loader
+                var addedCount = 0
+                
+                indices.forEach { index ->
+                    if (index in questions.indices) {
+                        val gen = questions[index]
+                        val rawOptions = gen.options
+                        val sortedOptions = listOf(
+                            rawOptions["A"] ?: "",
+                            rawOptions["B"] ?: "",
+                            rawOptions["C"] ?: "",
+                            rawOptions["D"] ?: ""
+                        ).map { it.trim() }
+                        
+                        val mappedCorrectIndex = when(gen.correct_option) {
+                            "A" -> 0
+                            "B" -> 1
+                            "C" -> 2
+                            "D" -> 3
+                            else -> 0
+                        }
+                        
+                        val q = Question(
+                            subject = "AI POOL",
+                            subjectTag = gen.subject_tag,
                             questionText = gen.question.trim(),
-                            options = safeOptions,
-                            correctIndex = gen.correctIndex.coerceIn(0, (safeOptions.size - 1).coerceAtLeast(0)),
-                            explanation = gen.explanation.trim()
+                            options = sortedOptions,
+                            correctIndex = mappedCorrectIndex,
+                            explanation = gen.explanation.trim(),
+                            timestamp = System.currentTimeMillis()
                         )
-                    )
-                    if (success) addedCount++
+                        
+                        val success = repository.addQuestion(q)
+                        if (success) addedCount++
+                    }
                 }
+                
+                val skipped = indices.size - addedCount
+                val message = if (skipped > 0) {
+                    "$addedCount new questions added ($skipped skipped as duplicates)"
+                } else {
+                    "$addedCount questions added!"
+                }
+                
+                _uiState.value = _uiState.value.copy(
+                    infoMessage = message,
+                    isSyncing = false
+                )
+                discardGeneratedQuestions()
+            } catch (e: Exception) {
+                Log.e("InputViewModel", "Error saving questions", e)
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = "Failed to save questions: ${e.localizedMessage}",
+                    isSyncing = false
+                )
             }
-            
-            val skipped = indices.size - addedCount
-            val message = if (skipped > 0) {
-                "$addedCount new questions added ($skipped skipped as duplicates)"
-            } else {
-                "$addedCount questions added!"
-            }
-            
-            _uiState.value = _uiState.value.copy(infoMessage = message)
-            discardGeneratedQuestions()
         }
     }
 
@@ -375,9 +413,10 @@ class InputViewModel @Inject constructor(
 
 data class GeneratedQuestion(
     val question: String,
-    val options: List<String>,
-    val correctIndex: Int,
-    val explanation: String = ""
+    val options: Map<String, String>,
+    val correct_option: String,
+    val explanation: String = "",
+    val subject_tag: String = "General Knowledge"
 )
 
 data class InputUiState(
@@ -388,6 +427,7 @@ data class InputUiState(
     val subject: String = "",
     val availableSubjects: List<String> = emptyList(),
     val weakSubjects: List<SubjectCount> = emptyList(),
+    val weeklyStats: com.example.pscmaster.data.local.WeeklyStats = com.example.pscmaster.data.local.WeeklyStats(0, 0),
     val recentQuestions: List<QuestionWithMetadata> = emptyList(),
     val totalQuestionsCount: Int = 0,
     val isGenerating: Boolean = false,

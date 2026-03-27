@@ -135,21 +135,42 @@ fun HomeScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(20.dp), // Reduced padding
+                            .padding(20.dp),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text(
-                                text = "Welcome back!",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-                            )
-                            Text(
-                                text = "PSC Master",
-                                style = MaterialTheme.typography.headlineSmall, // Reduced size
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Welcome back!",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                )
+                                Text(
+                                    text = "PSC Master",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                            
+                            // Weekly Progress Circle
+                            val weeklyAccuracy = if (uiState.weeklyStats.total > 0) (uiState.weeklyStats.correct * 100) / uiState.weeklyStats.total else 0
+                            Surface(
+                                color = Color.White.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("$weeklyAccuracy%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.White)
+                                    Text("WEEKLY", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.7f), fontSize = 8.sp)
+                                }
+                            }
                         }
                         
                         Row(
@@ -171,6 +192,12 @@ fun HomeScreen(
                                 icon = Icons.Rounded.Category,
                                 value = "${uiState.availableSubjects.size}",
                                 label = "Subjects",
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                            StatItem(
+                                icon = Icons.Rounded.TaskAlt,
+                                value = "${uiState.weeklyStats.total}",
+                                label = "Attempts",
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             )
                         }

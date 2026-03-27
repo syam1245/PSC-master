@@ -170,6 +170,11 @@ class PSCRepositoryImpl @Inject constructor(
         return performanceDao.getWeakSubjects()
     }
 
+    override fun getWeeklyProgress(): Flow<com.example.pscmaster.data.local.WeeklyStats> {
+        val weekAgo = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000)
+        return performanceDao.getWeeklyStats(weekAgo)
+    }
+
     override suspend fun getCachedInsights(hash: Int): AiResult? = withContext(Dispatchers.IO) {
         val savedHash = prefs.getInt("cached_hash", 0)
         if (savedHash == hash) {
@@ -188,6 +193,10 @@ class PSCRepositoryImpl @Inject constructor(
             .putString("cached_insights", result.insights)
             .putString("cached_provider", result.provider)
             .apply()
+    }
+
+    override suspend fun getQuestionsWithMistakes(): List<QuestionWithMetadata> = withContext(Dispatchers.IO) {
+        questionDao.getQuestionsWithMistakes()
     }
     
     override suspend fun startQuizSession(subject: String?): QuizSession = withContext(Dispatchers.IO) {

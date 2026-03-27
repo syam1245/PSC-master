@@ -95,6 +95,14 @@ fun MainNavigation() {
             composable("analytics") {
                 AnalyticsScreen(
                     viewModel = hiltViewModel(),
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToMistakes = { navController.navigate("mistake_notebook") },
+                    onNavigateToQuiz = { navController.navigate("quiz") }
+                )
+            }
+            composable("mistake_notebook") {
+                MistakeNotebookScreen(
+                    viewModel = hiltViewModel(),
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

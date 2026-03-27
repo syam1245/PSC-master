@@ -26,8 +26,10 @@ interface PSCRepository {
     fun getAllPerformance(): Flow<List<UserPerformance>>
     suspend fun getWrongAnswers(): List<UserPerformance>
     fun getWeakSubjects(): Flow<List<SubjectCount>>
+    fun getWeeklyProgress(): Flow<com.example.pscmaster.data.local.WeeklyStats>
     suspend fun getCachedInsights(hash: Int): AiResult?
     suspend fun saveCachedInsights(hash: Int, result: AiResult)
+    suspend fun getQuestionsWithMistakes(): List<QuestionWithMetadata>
     
     // Quiz Sessions & Adaptive Engine
     suspend fun startQuizSession(subject: String?): QuizSession

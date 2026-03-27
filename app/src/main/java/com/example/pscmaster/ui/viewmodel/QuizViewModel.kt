@@ -88,8 +88,12 @@ class QuizViewModel @Inject constructor(
                     loadingVariations = _uiState.value.loadingVariations + questionIndex
                 )
 
-                val correctAnswerText = question.options[question.correctIndex]
-                val result = aiService.generateVariation(question.questionText, correctAnswerText)
+                val result = aiService.generateVariation(
+                    question = question.questionText,
+                    options = question.options,
+                    correctIndex = question.correctIndex,
+                    subject = question.subject
+                )
 
                 if (result.provider != "Error") {
                     _uiState.value = _uiState.value.copy(
@@ -150,10 +154,8 @@ class QuizViewModel @Inject constructor(
                 currentQuestionIndex = 0
             )
 
-            // Auto-generate first variation if enabled
-            if (_configState.value.isAiVariationEnabled && displayQuestions.isNotEmpty()) {
-                generateAiVariation(0)
-            }
+            // Auto-generation on start is disabled to save AI tokens.
+            // User can manually click the 'Variation' button on any question page.
         }
     }
 

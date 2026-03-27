@@ -9,12 +9,14 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["questionText"], unique = true),
         Index(value = ["subject"]),
+        Index(value = ["subjectTag"]),
         Index(value = ["nextReviewTimestamp"])
     ]
 )
 data class Question(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val subject: String = "",
+    val subjectTag: String = "",
     val questionText: String = "",
     val options: List<String> = emptyList(),
     val correctIndex: Int = 0,
