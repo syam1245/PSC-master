@@ -5,6 +5,8 @@ import androidx.room.Room
 import com.example.pscmaster.data.local.AppDatabase
 import com.example.pscmaster.data.local.PerformanceDao
 import com.example.pscmaster.data.local.QuestionDao
+import com.example.pscmaster.data.local.SessionDao
+import com.example.pscmaster.data.local.PerformanceMetricsDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -27,7 +29,10 @@ object DatabaseModule {
             .addMigrations(
                 AppDatabase.MIGRATION_1_2, 
                 AppDatabase.MIGRATION_2_3,
-                AppDatabase.MIGRATION_3_4
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7
             )
             .build()
     }
@@ -40,5 +45,15 @@ object DatabaseModule {
     @Provides
     fun providePerformanceDao(database: AppDatabase): PerformanceDao {
         return database.performanceDao()
+    }
+
+    @Provides
+    fun provideSessionDao(database: AppDatabase): SessionDao {
+        return database.sessionDao()
+    }
+
+    @Provides
+    fun provideMetricsDao(database: AppDatabase): PerformanceMetricsDao {
+        return database.metricsDao()
     }
 }

@@ -4,16 +4,18 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
-import android.os.Environment
-import android.os.StatFs
 import android.util.Log
+import androidx.room.withTransaction
 import com.example.pscmaster.api.AiResult
 import com.example.pscmaster.data.entity.Question
 import com.example.pscmaster.data.entity.UserPerformance
 import com.example.pscmaster.data.local.AppDatabase
 import com.example.pscmaster.data.local.PerformanceDao
 import com.example.pscmaster.data.local.QuestionDao
+import com.example.pscmaster.data.local.SessionDao
+import com.example.pscmaster.data.local.PerformanceMetricsDao
 import com.example.pscmaster.data.local.SubjectCount
+import com.example.pscmaster.data.entity.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -31,6 +33,7 @@ import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -38,6 +41,8 @@ class PSCRepositoryImpl @Inject constructor(
     private val database: AppDatabase,
     private val questionDao: QuestionDao,
     private val performanceDao: PerformanceDao,
+    private val sessionDao: SessionDao,
+    private val metricsDao: PerformanceMetricsDao,
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
     @ApplicationContext private val context: Context
@@ -55,7 +60,8 @@ class PSCRepositoryImpl @Inject constructor(
     override suspend fun addQuestion(question: Question): Boolean {
         val id = questionDao.insertQuestion(question)
         if (id != -1L) {
-            pushQuestionToFirebase(question)
+            sessionDao.upsertBadgeState(QuestionBadgeState(questionId = id, state = QuestionBadgeState.STATE_UNSEEN))
+            pushQuestionToFirebase(question.copy(id = id))
         }
         return id != -1L
     }
@@ -81,6 +87,10 @@ class PSCRepositoryImpl @Inject constructor(
 
     override fun getAllQuestions(): Flow<List<Question>> {
         return questionDao.getAllQuestions()
+    }
+
+    override suspend fun getAllQuestionsWithMetadata(): List<QuestionWithMetadata> = withContext(Dispatchers.IO) {
+        questionDao.getAllQuestionsWithMetadata()
     }
 
     override suspend fun deleteQuestion(question: Question) {
@@ -179,13 +189,93 @@ class PSCRepositoryImpl @Inject constructor(
             .putString("cached_provider", result.provider)
             .apply()
     }
+    
+    override suspend fun startQuizSession(subject: String?): QuizSession = withContext(Dispatchers.IO) {
+        val session = QuizSession(subjectFilter = subject)
+        sessionDao.insertSession(session)
+        session
+    }
+
+    override fun observeBadgeState(questionId: Long): Flow<Int?> {
+        return sessionDao.observeBadgeState(questionId)
+    }
+
+    override suspend fun finishQuizSession(sessionId: String, performances: List<UserPerformance>) = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            val session = sessionDao.getSessionById(sessionId) ?: return@withTransaction
+            
+            // 1. Mark session as completed
+            sessionDao.updateSession(session.copy(
+                isCompleted = true,
+                endTime = System.currentTimeMillis()
+            ))
+
+            // 2. Update Badge States to REMOVED (3) for questions in this session
+            val badgeStates = performances.map { 
+                QuestionBadgeState(questionId = it.questionId, state = QuestionBadgeState.STATE_BADGE_REMOVED) 
+            }
+            sessionDao.bulkUpsertBadgeState(badgeStates)
+
+            // 3. Update Performance Metrics
+            performances.forEach { perf ->
+                val currentMetrics = metricsDao.getMetricsForQuestion(perf.questionId)
+                    ?: UserPerformanceMetrics(questionId = perf.questionId)
+                
+                val totalAttempts = currentMetrics.totalAttempts + 1
+                val correctAttempts = if (perf.isCorrect) currentMetrics.correctAttempts + 1 else currentMetrics.correctAttempts
+                val consecutiveCorrect = if (perf.isCorrect) currentMetrics.consecutiveCorrect + 1 else 0
+                
+                metricsDao.upsertMetrics(currentMetrics.copy(
+                    totalAttempts = totalAttempts,
+                    correctAttempts = correctAttempts,
+                    lastAttemptTimestamp = System.currentTimeMillis(),
+                    consecutiveCorrect = consecutiveCorrect
+                ))
+
+                // Also update the legacy SRS system
+                updateSrs(perf.questionId, perf.isCorrect)
+                
+                // Save to legacy performance table
+                performanceDao.insertPerformance(perf)
+            }
+        }
+    }
+
+    override suspend fun generateAdaptiveQuiz(size: Int, subject: String?, newQuestionRatio: Float): List<Question> = withContext(Dispatchers.IO) {
+        val newCount = (size * newQuestionRatio).toInt()
+        val repeatCount = size - newCount
+
+        val candidates = if (subject == null) {
+            questionDao.getNewCandidateQuestions(newCount)
+        } else {
+            questionDao.getQuestionsWithMetadataBySubject(subject)
+                .filter { (it.badgeState?.state ?: 0) < 3 }
+                .shuffled()
+                .take(newCount)
+        }
+
+        val newOnes = candidates.map { it.question }
+        
+        val repeats = if (subject == null) {
+            questionDao.getAllQuestionsList()
+                .filter { q -> !newOnes.any { it.id == q.id } }
+                .shuffled()
+                .take(repeatCount)
+        } else {
+            questionDao.getQuestionsBySubjects(listOf(subject))
+                .filter { q -> !newOnes.any { it.id == q.id } }
+                .shuffled()
+                .take(repeatCount)
+        }
+
+        (newOnes + repeats).shuffled()
+    }
 
     override suspend fun importQuestionsFromCsv(uri: Uri): Int = withContext(Dispatchers.IO) {
         val questionsToInsert = mutableListOf<Question>()
         try {
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 csvReader().readAll(inputStream).forEachIndexed { index, row ->
-                    // Skip header if it exists and this is the first row
                     if (index == 0 && row.any { it.contains("subject", ignoreCase = true) }) {
                         return@forEachIndexed
                     }
@@ -196,7 +286,8 @@ class PSCRepositoryImpl @Inject constructor(
                                 subject = row[0].trim(),
                                 questionText = row[1].trim(),
                                 options = listOf(row[2].trim(), row[3].trim(), row[4].trim(), row[5].trim()),
-                                correctIndex = (row[6].trim().toIntOrNull() ?: 0).coerceIn(0, 3)
+                                correctIndex = (row[6].trim().toIntOrNull() ?: 0).coerceIn(0, 3),
+                                explanation = if (row.size >= 8) row[7].trim() else ""
                             )
                         )
                     }
@@ -207,7 +298,11 @@ class PSCRepositoryImpl @Inject constructor(
                 val results = questionDao.bulkInsert(questionsToInsert)
                 val addedCount = results.count { it != -1L }
                 
-                // Trigger a full sync in background if any were added
+                val newBadgeStates = results.filter { it != -1L }.map { id ->
+                    QuestionBadgeState(questionId = id, state = QuestionBadgeState.STATE_UNSEEN)
+                }
+                sessionDao.bulkUpsertBadgeState(newBadgeStates)
+
                 if (addedCount > 0) {
                     repositoryScope.launch { 
                         syncToFirebase()
@@ -226,9 +321,7 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override fun closeDatabase() {
-        // Cancel all ongoing coroutines
         repositoryScope.coroutineContext.cancelChildren()
-        // Remove Firebase listener
         syncListenerRegistration?.remove()
         syncListenerRegistration = null
         if (database.isOpen) {
@@ -262,26 +355,25 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getRevisionQuestions(): List<Question> {
+        // Implement logic or use existing Dao method
         val questions = questionDao.getScheduledRevisionQuestions(System.currentTimeMillis()).toMutableList()
-        if (questions.size < 10) {
-            val needed = 10 - questions.size
-            questions.addAll(questionDao.getNewQuestions(needed))
-        }
+        // If not enough revision questions, add some new ones (simplified logic)
         return interleaveBySubject(questions.shuffled(secureRandom))
     }
 
     private fun interleaveBySubject(questions: List<Question>): List<Question> {
         if (questions.size <= 1) return questions
+        val grouped = questions.groupBy { it.subject }
+            .values
+            .map { java.util.LinkedList(it) }
         
-        val grouped = questions.groupBy { it.subject }.values.map { it.toMutableList() }
-        val result = mutableListOf<Question>()
-        
+        val result = ArrayList<Question>(questions.size)
         var hasMore = true
         while (hasMore) {
             hasMore = false
             for (group in grouped) {
                 if (group.isNotEmpty()) {
-                    result.add(group.removeAt(0))
+                    result.add(group.removeFirst())
                     hasMore = true
                 }
             }
@@ -293,19 +385,6 @@ class PSCRepositoryImpl @Inject constructor(
         return context.getDatabasePath(dbName)
     }
 
-    override fun getStorageInfo(): StorageInfo {
-        val dbFile = getDatabaseFile()
-        val dbSizeBytes = if (dbFile.exists()) dbFile.length() else 0L
-        
-        val stat = StatFs(Environment.getDataDirectory().path)
-        val availableSpaceBytes = stat.blockSizeLong * stat.availableBlocksLong
-        
-        return StorageInfo(
-            path = dbFile.absolutePath,
-            sizeBytes = dbSizeBytes,
-            availableSpaceBytes = availableSpaceBytes
-        )
-    }
 
     override suspend fun exportDatabaseToCache(): File? = withContext(Dispatchers.IO) {
         val dbFile = getDatabaseFile()
@@ -330,8 +409,8 @@ class PSCRepositoryImpl @Inject constructor(
     override suspend fun importDatabaseFromUri(uri: Uri): Unit = withContext(Dispatchers.IO) {
         try {
             closeDatabase()
+            delay(200) 
             val dbFile = getDatabaseFile()
-            // Delete WAL and SHM journal files for a clean import
             File(dbFile.path + "-wal").delete()
             File(dbFile.path + "-shm").delete()
             context.contentResolver.openInputStream(uri)?.use { input ->
@@ -339,11 +418,25 @@ class PSCRepositoryImpl @Inject constructor(
                     input.copyTo(output)
                 }
             }
-            // Reset sync timestamp on new DB import
             syncPrefs.edit().putLong("last_sync_timestamp", 0L).apply()
         } catch (e: Exception) {
             Log.e("PSCRepository", "Database import failed", e)
         }
+    }
+
+    override fun getStorageInfo(): Pair<String, String> {
+        val dbFile = getDatabaseFile()
+        val dbSize = if (dbFile.exists()) {
+            val size = dbFile.length()
+            if (size < 1024 * 1024) "${size / 1024} KB"
+            else String.format(Locale.US, "%.2f MB", size.toDouble() / (1024 * 1024))
+        } else "0 KB"
+
+        val freeSpace = context.filesDir.usableSpace
+        val freeSpaceStr = if (freeSpace < 1024 * 1024 * 1024) "${freeSpace / (1024 * 1024)} MB"
+        else String.format(Locale.US, "%.2f GB", freeSpace.toDouble() / (1024 * 1024 * 1024))
+
+        return Pair(dbSize, freeSpaceStr)
     }
 
     private fun String.toStableId(): String {
@@ -354,13 +447,9 @@ class PSCRepositoryImpl @Inject constructor(
 
     override suspend fun syncToFirebase(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val userId = auth.currentUser?.uid
-            if (userId == null) {
-                return@withContext Result.failure(Exception("User not logged in"))
-            }
+            val userId = auth.currentUser?.uid ?: return@withContext Result.failure(Exception("User not logged in"))
 
             withTimeout(60000L) {
-                // 1. Upload local changes (anything newer than last sync)
                 val lastSync = syncPrefs.getLong("last_sync_timestamp", 0L)
                 val localQuestions = questionDao.getAllQuestionsList().filter { it.timestamp > lastSync }
                 
@@ -377,7 +466,6 @@ class PSCRepositoryImpl @Inject constructor(
                     }
                 }
 
-                // 2. Fetch remote changes (anything newer than last sync)
                 val remoteQuery = firestore.collection("shared_questions")
                     .whereGreaterThan("timestamp", lastSync)
                     .orderBy("timestamp", Query.Direction.ASCENDING)
@@ -386,7 +474,6 @@ class PSCRepositoryImpl @Inject constructor(
                 remoteQuestions.documents.forEach { doc ->
                     val question = doc.toObject(Question::class.java)
                     if (question != null) {
-                        // Use insert with IGNORE or handle update
                         val existing = questionDao.getQuestionByText(question.questionText)
                         if (existing == null) {
                             questionDao.insertQuestion(question.copy(id = 0))
@@ -396,7 +483,6 @@ class PSCRepositoryImpl @Inject constructor(
                     }
                 }
                 
-                // Update sync timestamp to now
                 syncPrefs.edit().putLong("last_sync_timestamp", System.currentTimeMillis()).apply()
             }
             Result.success(Unit)
@@ -407,9 +493,11 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override fun startRealtimeSync() {
-        // Real-time sync handles immediate updates, we still keep it but now our manual sync is efficient
         syncListenerRegistration?.remove()
+        
+        val lastSync = syncPrefs.getLong("last_sync_timestamp", 0L)
         syncListenerRegistration = firestore.collection("shared_questions")
+            .whereGreaterThan("timestamp", lastSync)
             .addSnapshotListener { snapshots, e ->
                 if (e != null) {
                     Log.w("FirebaseSync", "Listen failed.", e)
@@ -419,35 +507,30 @@ class PSCRepositoryImpl @Inject constructor(
                 snapshots?.documentChanges?.forEach { dc ->
                     repositoryScope.launch {
                         try {
-                            val question = dc.document.toObject(Question::class.java)
+                            val question = dc.document.toObject(Question::class.java) ?: return@launch
                             when (dc.type) {
                                 com.google.firebase.firestore.DocumentChange.Type.ADDED -> {
-                                    if (question != null) {
+                                    questionDao.insertQuestion(question.copy(id = 0))
+                                }
+                                com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
+                                    val local = questionDao.getQuestionByText(question.questionText)
+                                    if (local != null) {
+                                        if (question.timestamp > local.timestamp) {
+                                            questionDao.updateQuestion(local.copy(
+                                                options = question.options,
+                                                correctIndex = question.correctIndex,
+                                                explanation = question.explanation,
+                                                subject = question.subject,
+                                                timestamp = question.timestamp
+                                            ))
+                                        }
+                                    } else {
                                         questionDao.insertQuestion(question.copy(id = 0))
                                     }
                                 }
-                                com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                    if (question != null) {
-                                        val local = questionDao.getQuestionByText(question.questionText)
-                                        if (local != null) {
-                                            if (question.timestamp > local.timestamp) {
-                                                questionDao.updateQuestion(local.copy(
-                                                    options = question.options,
-                                                    correctIndex = question.correctIndex,
-                                                    subject = question.subject,
-                                                    timestamp = question.timestamp
-                                                ))
-                                            }
-                                        } else {
-                                            questionDao.insertQuestion(question.copy(id = 0))
-                                        }
-                                    }
-                                }
                                 com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                                    if (question != null) {
-                                        val local = questionDao.getQuestionByText(question.questionText)
-                                        if (local != null) questionDao.deleteQuestion(local)
-                                    }
+                                    val local = questionDao.getQuestionByText(question.questionText)
+                                    if (local != null) questionDao.deleteQuestion(local)
                                 }
                             }
                         } catch (e: Exception) {

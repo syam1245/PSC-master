@@ -18,6 +18,7 @@ data class Question(
     val questionText: String = "",
     val options: List<String> = emptyList(),
     val correctIndex: Int = 0,
+    val explanation: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val nextReviewTimestamp: Long = 0,
     val intervalIndex: Int = 0

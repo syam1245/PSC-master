@@ -5,14 +5,25 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.example.pscmaster.data.entity.Question
-import com.example.pscmaster.data.entity.UserPerformance
+import com.example.pscmaster.data.entity.*
 
-@Database(entities = [Question::class, UserPerformance::class], version = 4, exportSchema = false)
+@Database(
+    entities = [
+        Question::class,
+        UserPerformance::class,
+        QuizSession::class,
+        QuestionBadgeState::class,
+        UserPerformanceMetrics::class
+    ],
+    version = 7,
+    exportSchema = false
+)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun questionDao(): QuestionDao
     abstract fun performanceDao(): PerformanceDao
+    abstract fun sessionDao(): SessionDao
+    abstract fun metricsDao(): PerformanceMetricsDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -41,6 +52,58 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_questions_subject ON questions (subject)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_questions_nextReviewTimestamp ON questions (nextReviewTimestamp)")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE questions ADD COLUMN explanation TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_user_performance_questionId_timestamp ON user_performance (questionId, timestamp)")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Table: quiz_sessions
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS quiz_sessions (
+                        sessionId TEXT NOT NULL PRIMARY KEY,
+                        startTime INTEGER NOT NULL,
+                        endTime INTEGER,
+                        isCompleted INTEGER NOT NULL DEFAULT 0,
+                        subjectFilter TEXT
+                    )
+                """.trimIndent())
+
+                // Table: question_badge_state
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS question_badge_state (
+                        questionId INTEGER NOT NULL PRIMARY KEY,
+                        state INTEGER NOT NULL DEFAULT 0,
+                        lastSessionId TEXT,
+                        FOREIGN KEY(questionId) REFERENCES questions(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_badge_state ON question_badge_state (state)")
+
+                // Table: user_performance_metrics
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS user_performance_metrics (
+                        questionId INTEGER NOT NULL PRIMARY KEY,
+                        totalAttempts INTEGER NOT NULL DEFAULT 0,
+                        correctAttempts INTEGER NOT NULL DEFAULT 0,
+                        lastAttemptTimestamp INTEGER NOT NULL DEFAULT 0,
+                        averageTimeSpent INTEGER NOT NULL DEFAULT 0,
+                        difficultyFlag INTEGER NOT NULL DEFAULT 0,
+                        consecutiveCorrect INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(questionId) REFERENCES questions(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
             }
         }
     }

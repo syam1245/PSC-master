@@ -6,8 +6,9 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.pscmaster.data.entity.Question
+import com.example.pscmaster.data.entity.*
 import com.example.pscmaster.data.repository.PSCRepository
+import com.example.pscmaster.data.local.SubjectCount
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,8 +43,12 @@ class InputViewModel @Inject constructor(
         }
         // Full question list for ManageQuestionsScreen
         viewModelScope.launch {
-            repository.getAllQuestions().collectLatest { questions ->
-                _uiState.value = _uiState.value.copy(recentQuestions = questions)
+            // We need a Flow of QuestionWithMetadata. Since QuestionDao returns Flow<List<Question>>,
+            // and we added getQuestionsWithMetadata, we might need to observe changes.
+            // For now, let's fetch once or update QuestionDao to return Flow<List<QuestionWithMetadata>>.
+            repository.getAllQuestions().collectLatest { 
+                val withMetadata = repository.getAllQuestionsWithMetadata()
+                _uiState.value = _uiState.value.copy(recentQuestions = withMetadata)
             }
         }
         viewModelScope.launch {
@@ -51,7 +56,11 @@ class InputViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(availableSubjects = subjects)
             }
         }
-        updateStorageInfo()
+        viewModelScope.launch {
+            repository.getWeakSubjects().collectLatest { weak ->
+                _uiState.value = _uiState.value.copy(weakSubjects = weak)
+            }
+        }
         checkAuthStatus()
     }
 
@@ -111,22 +120,6 @@ class InputViewModel @Inject constructor(
         }
     }
 
-    fun updateStorageInfo() {
-        val info = repository.getStorageInfo()
-        _uiState.value = _uiState.value.copy(
-            dbPath = info.path,
-            dbSize = formatFileSize(info.sizeBytes),
-            dbSizeBytes = info.sizeBytes,
-            availableSpace = formatFileSize(info.availableSpaceBytes)
-        )
-    }
-
-    private fun formatFileSize(size: Long): String {
-        if (size <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        return String.format(Locale.getDefault(), "%.2f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
-    }
 
     fun updateQuestionText(text: String) {
         _uiState.value = _uiState.value.copy(questionText = text)
@@ -148,6 +141,10 @@ class InputViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(subject = subject)
     }
 
+    fun updateExplanation(explanation: String) {
+        _uiState.value = _uiState.value.copy(explanation = explanation)
+    }
+
     fun saveQuestion() {
         val state = _uiState.value
         if (state.questionText.isBlank() || state.options.any { it.isBlank() } || state.subject.isBlank()) {
@@ -156,30 +153,63 @@ class InputViewModel @Inject constructor(
 
         viewModelScope.launch {
             val question = Question(
+                id = state.editingQuestionId ?: 0L,
                 subject = state.subject,
                 questionText = state.questionText.trim(),
                 options = state.options.map { it.trim() },
-                correctIndex = state.correctIndex
+                correctIndex = state.correctIndex,
+                explanation = state.explanation.trim(),
+                timestamp = System.currentTimeMillis()
             )
-            val success = repository.addQuestion(question)
+            
+            val success = if (state.editingQuestionId != null) {
+                repository.updateQuestion(question)
+                true
+            } else {
+                repository.addQuestion(question)
+            }
+
             if (success) {
                 _uiState.value = _uiState.value.copy(
                     questionText = "",
                     options = listOf("", "", "", ""),
                     correctIndex = 0,
-                    infoMessage = "Question Saved!"
+                    explanation = "",
+                    editingQuestionId = null,
+                    infoMessage = if (state.editingQuestionId != null) "Question Updated!" else "Question Saved!"
                 )
             } else {
                 _uiState.value = _uiState.value.copy(errorMessage = "Question already exists!")
             }
-            updateStorageInfo()
         }
+    }
+
+    fun startEditing(item: QuestionWithMetadata) {
+        val q = item.question
+        _uiState.value = _uiState.value.copy(
+            editingQuestionId = q.id,
+            questionText = q.questionText,
+            options = q.options,
+            correctIndex = q.correctIndex,
+            explanation = q.explanation,
+            subject = q.subject
+        )
+    }
+
+    fun cancelEditing() {
+        _uiState.value = _uiState.value.copy(
+            editingQuestionId = null,
+            questionText = "",
+            options = listOf("", "", "", ""),
+            correctIndex = 0,
+            explanation = "",
+            subject = ""
+        )
     }
 
     fun deleteQuestion(question: Question) {
         viewModelScope.launch {
             repository.deleteQuestion(question)
-            updateStorageInfo()
         }
     }
 
@@ -188,11 +218,16 @@ class InputViewModel @Inject constructor(
         viewModelScope.launch {
             repository.deleteQuestions(questions)
             _uiState.value = _uiState.value.copy(infoMessage = "Deleted ${questions.size} questions")
-            updateStorageInfo()
         }
     }
 
-
+    fun updateStorageInfo() {
+        val info = repository.getStorageInfo()
+        _uiState.value = _uiState.value.copy(
+            dbSize = info.first,
+            availableSpace = info.second
+        )
+    }
 
     fun onExportRequested(context: Context, onUriReady: (Uri) -> Unit) {
         viewModelScope.launch {
@@ -229,7 +264,6 @@ class InputViewModel @Inject constructor(
         viewModelScope.launch {
             val count = repository.importQuestionsFromCsv(uri)
             _uiState.value = _uiState.value.copy(infoMessage = "Imported $count new questions")
-            updateStorageInfo()
         }
     }
 
@@ -311,7 +345,8 @@ class InputViewModel @Inject constructor(
                             subject = subject,
                             questionText = gen.question.trim(),
                             options = safeOptions,
-                            correctIndex = gen.correctIndex.coerceIn(0, (safeOptions.size - 1).coerceAtLeast(0))
+                            correctIndex = gen.correctIndex.coerceIn(0, (safeOptions.size - 1).coerceAtLeast(0)),
+                            explanation = gen.explanation.trim()
                         )
                     )
                     if (success) addedCount++
@@ -327,7 +362,6 @@ class InputViewModel @Inject constructor(
             
             _uiState.value = _uiState.value.copy(infoMessage = message)
             discardGeneratedQuestions()
-            updateStorageInfo()
         }
     }
 
@@ -342,20 +376,19 @@ class InputViewModel @Inject constructor(
 data class GeneratedQuestion(
     val question: String,
     val options: List<String>,
-    val correctIndex: Int
+    val correctIndex: Int,
+    val explanation: String = ""
 )
 
 data class InputUiState(
     val questionText: String = "",
     val options: List<String> = listOf("", "", "", ""),
     val correctIndex: Int = 0,
+    val explanation: String = "",
     val subject: String = "",
     val availableSubjects: List<String> = emptyList(),
-    val recentQuestions: List<Question> = emptyList(),
-    val dbPath: String = "",
-    val dbSize: String = "",
-    val dbSizeBytes: Long = 0L,
-    val availableSpace: String = "",
+    val weakSubjects: List<SubjectCount> = emptyList(),
+    val recentQuestions: List<QuestionWithMetadata> = emptyList(),
     val totalQuestionsCount: Int = 0,
     val isGenerating: Boolean = false,
     val generatedQuestions: List<GeneratedQuestion> = emptyList(),
@@ -365,5 +398,8 @@ data class InputUiState(
     val isLoggedIn: Boolean = false,
     val isSyncing: Boolean = false,
     val userEmail: String = "",
-    val needsRestart: Boolean = false
+    val needsRestart: Boolean = false,
+    val dbSize: String = "0 KB",
+    val availableSpace: String = "0 MB",
+    val editingQuestionId: Long? = null
 )

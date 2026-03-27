@@ -84,6 +84,7 @@ fun InputScreen(
                     when (speechTarget) {
                         null -> viewModel.updateQuestionText(text)
                         in 0..3 -> viewModel.updateOption(speechTarget!!, text)
+                        100 -> viewModel.updateExplanation(text)
                     }
                 }
             }
@@ -351,6 +352,26 @@ fun InputScreen(
                     )
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = uiState.explanation,
+                onValueChange = { viewModel.updateExplanation(it) },
+                label = { Text("Explanation (Optional)") },
+                placeholder = { Text("Why is this the correct answer?") },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                trailingIcon = {
+                    if (isSpeechAvailable) {
+                        IconButton(onClick = { startSpeech(100) }) {
+                            Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                minLines = 2
+            )
+
             Spacer(Modifier.height(16.dp))
         }
     }

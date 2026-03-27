@@ -71,6 +71,7 @@ fun QuizScreen(
                     onToggleShuffle = viewModel::onToggleShuffle,
                     onToggleSubject = viewModel::onToggleSubject,
                     onToggleRevision = viewModel::onToggleRevision,
+                    onToggleAdaptiveMode = viewModel::onToggleAdaptiveMode,
                     onToggleAiVariation = viewModel::onToggleAiVariation,
                     onStart = viewModel::startPractice
                 )
@@ -160,13 +161,15 @@ fun QuizContent(uiState: QuizUiState, viewModel: QuizViewModel) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.weight(1f),
-            userScrollEnabled = true
+            userScrollEnabled = true,
+            beyondViewportPageCount = 1
         ) { pageIndex ->
             QuestionPage(
                 question = uiState.questions[pageIndex],
                 selectedOption = uiState.answeredIndices[pageIndex],
                 isSkipped = uiState.skippedIndices.contains(pageIndex),
                 isLastPage = pageIndex == uiState.questions.size - 1,
+                viewModel = viewModel,
                 onAnswerSelected = { optionIndex ->
                     viewModel.onAnswerSelected(pageIndex, optionIndex)
                 },
@@ -209,6 +212,7 @@ fun QuestionPage(
     selectedOption: Int?,
     isSkipped: Boolean,
     isLastPage: Boolean,
+    viewModel: QuizViewModel,
     onAnswerSelected: (Int) -> Unit,
     onSkip: () -> Unit,
     isAiVariationEnabled: Boolean,
@@ -254,13 +258,31 @@ fun QuestionPage(
                 )
             }
 
-            if (!isAnswered) {
+            Spacer(Modifier.width(8.dp))
+            
+            // New Badge State (Fetched reactively)
+            val badgeState by viewModel.observeBadgeState(question.id).collectAsState(initial = null)
+            if ((badgeState ?: 0) < 3) {
+                Surface(
+                    color = MaterialTheme.colorScheme.error,
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "NEW",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
                 TextButton(onClick = onSkip, contentPadding = PaddingValues(0.dp)) {
                     Icon(if (isSkipped) Icons.Default.Refresh else Icons.Default.SkipNext, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(if (isSkipped) "SKIPPED" else "SKIP", style = MaterialTheme.typography.labelLarge)
                 }
-            }
         }
 
         // 2. Scrollable Content Area (Question + Options)
@@ -408,6 +430,35 @@ fun QuestionPage(
                     }
                 }
             }
+
+            // Explanation Section
+            if (isAnswered && question.explanation.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .animateContentSize()
+                ) {
+                    Text(
+                        "EXPLANATION",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = question.explanation,
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 22.sp
+                        )
+                    }
+                }
+            }
         }
 
         // 3. Bottom Action (Fixed)
@@ -504,6 +555,7 @@ fun PracticeConfigurator(
     onToggleShuffle: (Boolean) -> Unit,
     onToggleSubject: (String) -> Unit,
     onToggleRevision: (Boolean) -> Unit,
+    onToggleAdaptiveMode: (Boolean) -> Unit,
     onToggleAiVariation: (Boolean) -> Unit,
     onStart: () -> Unit
 ) {
@@ -525,6 +577,17 @@ fun PracticeConfigurator(
                 checked = configState.isRevisionMode,
                 onCheckedChange = onToggleRevision,
                 color = MaterialTheme.colorScheme.primary
+            )
+
+            // Adaptive Engine Card
+            ConfigCard(
+                title = "ADAPTIVE ENGINE",
+                description = "Focuses on your weak areas and ensures you see new questions within 3 sessions.",
+                icon = Icons.Default.Psychology,
+                checked = configState.isAdaptiveMode,
+                onCheckedChange = onToggleAdaptiveMode,
+                color = MaterialTheme.colorScheme.secondary,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.1f)
             )
 
             if (!configState.isRevisionMode) {

@@ -1,10 +1,9 @@
 package com.example.pscmaster.data.repository
 
 import android.net.Uri
-import com.example.pscmaster.data.entity.Question
-import com.example.pscmaster.data.entity.UserPerformance
-import com.example.pscmaster.api.AiResult
+import com.example.pscmaster.data.entity.*
 import com.example.pscmaster.data.local.SubjectCount
+import com.example.pscmaster.api.AiResult
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
@@ -13,6 +12,7 @@ interface PSCRepository {
     suspend fun addQuestion(question: Question): Boolean
     suspend fun updateQuestion(question: Question)
     fun getAllQuestions(): Flow<List<Question>>
+    suspend fun getAllQuestionsWithMetadata(): List<QuestionWithMetadata>
     suspend fun deleteQuestion(question: Question)
     suspend fun deleteQuestions(questions: List<Question>)
     fun getAllSubjects(): Flow<List<String>>
@@ -29,24 +29,25 @@ interface PSCRepository {
     suspend fun getCachedInsights(hash: Int): AiResult?
     suspend fun saveCachedInsights(hash: Int, result: AiResult)
     
+    // Quiz Sessions & Adaptive Engine
+    suspend fun startQuizSession(subject: String?): QuizSession
+    suspend fun finishQuizSession(sessionId: String, performances: List<UserPerformance>)
+    suspend fun generateAdaptiveQuiz(size: Int, subject: String?, newQuestionRatio: Float = 0.2f): List<Question>
+    fun observeBadgeState(questionId: Long): Flow<Int?>
+    
     // Data Management
     suspend fun importQuestionsFromCsv(uri: Uri): Int
     suspend fun renameSubject(oldName: String, newName: String)
     fun getDatabaseFile(): File
-    fun getStorageInfo(): StorageInfo
     suspend fun exportDatabaseToCache(): File?
     suspend fun importDatabaseFromUri(uri: Uri)
     fun closeDatabase()
+    fun getStorageInfo(): Pair<String, String>
 
     // Firebase Sync
     suspend fun syncToFirebase(): Result<Unit>
     fun startRealtimeSync()
+    
     // Network
     fun isNetworkAvailable(): Boolean
 }
-
-data class StorageInfo(
-    val path: String,
-    val sizeBytes: Long,
-    val availableSpaceBytes: Long
-)

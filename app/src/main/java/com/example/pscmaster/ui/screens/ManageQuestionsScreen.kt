@@ -2,6 +2,8 @@ package com.example.pscmaster.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,8 +47,8 @@ fun ManageQuestionsScreen(
     var newSubjectName by remember { mutableStateOf("") }
     
     val filteredQuestions = uiState.recentQuestions.filter {
-        it.questionText.contains(debouncedSearchQuery, ignoreCase = true) ||
-        it.subject.contains(debouncedSearchQuery, ignoreCase = true)
+        it.question.questionText.contains(debouncedSearchQuery, ignoreCase = true) ||
+        it.question.subject.contains(debouncedSearchQuery, ignoreCase = true)
     }
 
     // Single Delete confirmation dialog
@@ -86,7 +88,7 @@ fun ManageQuestionsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val toDelete = uiState.recentQuestions.filter { it.id in selectedIds }
+                        val toDelete = uiState.recentQuestions.filter { it.question.id in selectedIds }.map { it.question }
                         viewModel.deleteQuestions(toDelete)
                         selectedIds = emptySet()
                         showBulkDeleteConfirm = false
@@ -216,8 +218,9 @@ fun ManageQuestionsScreen(
                 ) {
                     items(
                         items = filteredQuestions,
-                        key = { it.id }
-                    ) { question ->
+                        key = { it.question.id }
+                    ) { item ->
+                        val question = item.question
                         val isSelected = selectedIds.contains(question.id)
                         Card(
                             modifier = Modifier.fillMaxWidth().animateItem(),
@@ -273,19 +276,49 @@ fun ManageQuestionsScreen(
                                                 )
                                             }
                                         }
+
+                                        val isRecentlyAdded = System.currentTimeMillis() - question.timestamp < 172800000 // 2 Days
+                                        if ((item.badgeState?.state ?: 0) < 3 && isRecentlyAdded) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.error,
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "NEW",
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                        }
                                     }
                                     
                                     if (selectedIds.isEmpty()) {
-                                        IconButton(
-                                            onClick = { questionToDelete = question },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.DeleteSweep,
-                                                contentDescription = "Delete",
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(20.dp)
-                                            )
+                                        Row {
+                                            IconButton(
+                                                onClick = { viewModel.startEditing(item) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Edit",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { questionToDelete = question },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.DeleteSweep,
+                                                    contentDescription = "Delete",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -338,5 +371,63 @@ fun ManageQuestionsScreen(
                 }
             }
         }
+    }
+
+    // Edit Question Dialog
+    if (uiState.editingQuestionId != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelEditing() },
+            title = { Text("Edit Question", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = uiState.subject,
+                        onValueChange = { viewModel.updateSubject(it) },
+                        label = { Text("Subject") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = uiState.questionText,
+                        onValueChange = { viewModel.updateQuestionText(it) },
+                        label = { Text("Question") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    uiState.options.forEachIndexed { index, option ->
+                        OutlinedTextField(
+                            value = option,
+                            onValueChange = { viewModel.updateOption(index, it) },
+                            label = { Text("Option ${index + 1}") },
+                            modifier = Modifier.fillMaxWidth(),
+                            leadingIcon = {
+                                RadioButton(
+                                    selected = uiState.correctIndex == index,
+                                    onClick = { viewModel.updateCorrectIndex(index) }
+                                )
+                            }
+                        )
+                    }
+                    OutlinedTextField(
+                        value = uiState.explanation,
+                        onValueChange = { viewModel.updateExplanation(it) },
+                        label = { Text("Explanation") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.saveQuestion() }) {
+                    Text("Update")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelEditing() }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

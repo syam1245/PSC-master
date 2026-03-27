@@ -1,7 +1,7 @@
 package com.example.pscmaster.data.local
 
 import androidx.room.*
-import com.example.pscmaster.data.entity.Question
+import com.example.pscmaster.data.entity.*
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -54,6 +54,23 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE nextReviewTimestamp > 0 AND nextReviewTimestamp <= :currentTime")
     suspend fun getScheduledRevisionQuestions(currentTime: Long): List<Question>
 
-    @Query("SELECT * FROM questions WHERE nextReviewTimestamp = 0 ORDER BY RANDOM() LIMIT :limit")
-    suspend fun getNewQuestions(limit: Int = 10): List<Question>
+    @Transaction
+    @Query("SELECT * FROM questions WHERE id = :id")
+    suspend fun getQuestionWithMetadata(id: Long): QuestionWithMetadata?
+
+    @Transaction
+    @Query("SELECT * FROM questions ORDER BY timestamp DESC")
+    suspend fun getAllQuestionsWithMetadata(): List<QuestionWithMetadata>
+
+    @Transaction
+    @Query("""
+        SELECT * FROM questions 
+        WHERE id NOT IN (SELECT questionId FROM question_badge_state WHERE state = 3)
+        ORDER BY RANDOM() LIMIT :limit
+    """)
+    suspend fun getNewCandidateQuestions(limit: Int): List<QuestionWithMetadata>
+
+    @Transaction
+    @Query("SELECT * FROM questions WHERE subject = :subject")
+    suspend fun getQuestionsWithMetadataBySubject(subject: String): List<QuestionWithMetadata>
 }

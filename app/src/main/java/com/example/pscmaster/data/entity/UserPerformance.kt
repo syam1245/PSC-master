@@ -3,7 +3,10 @@ package com.example.pscmaster.data.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "user_performance")
+@Entity(
+    tableName = "user_performance",
+    indices = [androidx.room.Index(value = ["questionId", "timestamp"])]
+)
 data class UserPerformance(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val questionId: Long = 0,

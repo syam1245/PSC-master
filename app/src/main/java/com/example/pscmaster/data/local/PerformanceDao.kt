@@ -14,8 +14,6 @@ interface PerformanceDao {
     @Query("SELECT * FROM user_performance ORDER BY timestamp DESC")
     fun getAllPerformance(): Flow<List<UserPerformance>>
 
-    @Query("SELECT * FROM user_performance")
-    suspend fun getAllPerformanceList(): List<UserPerformance>
 
     @Query("""
         SELECT up.* 
