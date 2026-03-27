@@ -13,7 +13,13 @@ class AiServiceImpl @Inject constructor(
     private val geminiModel by lazy {
         GenerativeModel(
             modelName = "gemini-1.5-flash",
-            apiKey = BuildConfig.GEMINI_API_KEY.trim()
+            apiKey = BuildConfig.GEMINI_API_KEY.trim(),
+            safetySettings = listOf(
+                com.google.ai.client.generativeai.type.SafetySetting(com.google.ai.client.generativeai.type.HarmCategory.HARASSMENT, com.google.ai.client.generativeai.type.BlockThreshold.NONE),
+                com.google.ai.client.generativeai.type.SafetySetting(com.google.ai.client.generativeai.type.HarmCategory.HATE_SPEECH, com.google.ai.client.generativeai.type.BlockThreshold.NONE),
+                com.google.ai.client.generativeai.type.SafetySetting(com.google.ai.client.generativeai.type.HarmCategory.SEXUALLY_EXPLICIT, com.google.ai.client.generativeai.type.BlockThreshold.NONE),
+                com.google.ai.client.generativeai.type.SafetySetting(com.google.ai.client.generativeai.type.HarmCategory.DANGEROUS_CONTENT, com.google.ai.client.generativeai.type.BlockThreshold.NONE)
+            )
         )
     }
 
@@ -70,16 +76,6 @@ class AiServiceImpl @Inject constructor(
             - Rephrases the QUESTION STEM for deeper critical thinking
             - Never changes which option is correct
             
-            TRANSFORMATION TECHNIQUES:
-            1. REVERSE QUESTIONING
-            2. ELIMINATION FRAMING
-            3. CONTEXTUAL EMBEDDING
-            4. CAUSE->EFFECT flip
-            5. ATTRIBUTE QUESTIONING
-            6. COMPARATIVE FRAMING
-            7. YEAR/EVENT ANCHORING
-            8. INFERENCE BASED
-            
             INPUT:
             {
               "question": "$question",
@@ -94,7 +90,7 @@ class AiServiceImpl @Inject constructor(
               "difficulty": "$difficulty"
             }
             
-            OUTPUT FORMAT (Strict JSON, no extra text):
+            OUTPUT FORMAT (Strict JSON):
             {
               "original_question": "$question",
               "varied_question": "<transformed text>",
@@ -111,7 +107,6 @@ class AiServiceImpl @Inject constructor(
             errorLabel = "Variation unavailable"
         )
         
-        // Extract varied_question from JSON
         if (result.provider != "Error") {
             try {
                 val jsonStart = result.insights.indexOf("{")
@@ -134,20 +129,13 @@ class AiServiceImpl @Inject constructor(
     override suspend fun generateNewQuestions(subject: String, count: Int): AiResult {
         val prompt = """
             Your task is to generate $count high-quality multiple-choice questions for the "AI POOL" category.
+            All questions must belong to the 'AI POOL' category.
+            Include a 'subject_tag' from: [Geography, History, Polity, Science, Economics, General Knowledge].
             
-            CATEGORY ASSIGNMENT RULES (CRITICAL):
-            - ALL generated questions MUST be assigned to exactly ONE category: "AI POOL"
-            - NEVER create subcategories like "AI POOL ($subject)"
-            - The category field in your output must ALWAYS be exactly: "AI POOL"
-            
-            SUBJECT TAG RULES:
-            - Every question must include a "subject_tag" from this list ONLY: [Geography, Current Affairs, History, Polity, Science, Economics, Environment, Sports, Art & Culture, General Knowledge]
-            - Use "$subject" to guide the topic, but pick the best matching tag from above.
-            
-            OUTPUT FORMAT (Strict JSON):
+            OUTPUT FORMAT (Strict JSON Array):
             [
               {
-                "question": "<text>",
+                "question": "...",
                 "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
                 "correct_option": "A|B|C|D",
                 "explanation": "...",
@@ -160,7 +148,7 @@ class AiServiceImpl @Inject constructor(
 
         return executeAiAction(
             prompt = prompt,
-            systemPrompt = "You are an expert question generator. Return ONLY valid JSON array. Category must be 'AI POOL'.",
+            systemPrompt = "Return ONLY valid JSON array. Category must be 'AI POOL'.",
             errorLabel = "Generation failed."
         )
     }
@@ -188,13 +176,21 @@ class AiServiceImpl @Inject constructor(
                     val end = text.lastIndexOf(endChar)
 
                     if (start != -1 && end != -1 && end > start) {
-                        val cleaned = text.substring(start, end + 1).trim()
-                        return AiResult(cleaned, "Gemini 1.5 Flash")
+                        return AiResult(text.substring(start, end + 1).trim(), "Gemini 1.5 Flash")
+                    }
+                    // Fallback to raw text if no JSON marks found but prompt was for analysis
+                    if (systemPrompt.contains("assistant")) {
+                         return AiResult(text.trim(), "Gemini 1.5 Flash")
                     }
                 }
             } catch (e: Exception) {
-                Log.e("AiService", "Gemini failed: ${e.message}")
-                errors.add("Gemini: ${e.localizedMessage}")
+                val eMsg = e.message ?: "Unknown Error"
+                Log.e("AiService", "Gemini failed: $eMsg")
+                if (eMsg.contains("MissingFieldException")) {
+                    errors.add("Gemini: SDK Error (Model/Region issue). Check if Gemini 1.5 is enabled for your API Key.")
+                } else {
+                    errors.add("Gemini: $eMsg")
+                }
             }
         }
 
@@ -202,12 +198,13 @@ class AiServiceImpl @Inject constructor(
         if (BuildConfig.GROQ_API_KEY.isNotBlank() && BuildConfig.GROQ_API_KEY != "null") {
             try {
                 val request = GroqRequest(
+                    model = "llama-3.3-70b-versatile", 
                     messages = listOf(
                         GroqMessage(role = "system", content = systemPrompt),
                         GroqMessage(role = "user", content = prompt)
                     )
                 )
-                val response = groqApi.getChatCompletion("Bearer ${BuildConfig.GROQ_API_KEY}", request)
+                val response = groqApi.getChatCompletion("Bearer ${BuildConfig.GROQ_API_KEY.trim()}", request)
                 val result = response.choices.firstOrNull()?.message?.content
                 if (!result.isNullOrBlank()) {
                     val arrayStart = result.indexOf("[")
@@ -218,17 +215,19 @@ class AiServiceImpl @Inject constructor(
                     val end = result.lastIndexOf(endChar)
 
                     if (start != -1 && end != -1 && end > start) {
-                        val cleaned = result.substring(start, end + 1).trim()
-                        return AiResult(cleaned, "Groq Llama 3.1")
+                        return AiResult(result.substring(start, end + 1).trim(), "Groq Llama 3.3")
+                    }
+                    if (systemPrompt.contains("assistant")) {
+                         return AiResult(result.trim(), "Groq Llama 3.3")
                     }
                 }
             } catch (e: Exception) {
                 Log.e("AiService", "Groq failed: ${e.message}")
-                errors.add("Groq: ${e.localizedMessage}")
+                errors.add("Groq: ${e.message}")
             }
         }
 
-        val debugInfo = if (errors.isNotEmpty()) "\n\nDebug Info:\n${errors.joinToString("\n")}" else ""
+        val debugInfo = if (errors.isNotEmpty()) "\n\nDebug Info:\n${errors.joinToString("\n")}" else "\n(No API keys configured)"
         return AiResult("$errorLabel$debugInfo", "Error")
     }
 }

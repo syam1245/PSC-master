@@ -41,11 +41,15 @@ class InputViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(totalQuestionsCount = count)
             }
         }
+        // Observe mistakes count
+        viewModelScope.launch {
+            repository.getAllPerformance().collectLatest {
+                val mistakes = repository.getQuestionsWithMistakes().size
+                _uiState.value = _uiState.value.copy(mistakesCount = mistakes)
+            }
+        }
         // Full question list for ManageQuestionsScreen
         viewModelScope.launch {
-            // We need a Flow of QuestionWithMetadata. Since QuestionDao returns Flow<List<Question>>,
-            // and we added getQuestionsWithMetadata, we might need to observe changes.
-            // For now, let's fetch once or update QuestionDao to return Flow<List<QuestionWithMetadata>>.
             repository.getAllQuestions().collectLatest { 
                 val withMetadata = repository.getAllQuestionsWithMetadata()
                 _uiState.value = _uiState.value.copy(recentQuestions = withMetadata)
@@ -430,6 +434,7 @@ data class InputUiState(
     val weeklyStats: com.example.pscmaster.data.local.WeeklyStats = com.example.pscmaster.data.local.WeeklyStats(0, 0),
     val recentQuestions: List<QuestionWithMetadata> = emptyList(),
     val totalQuestionsCount: Int = 0,
+    val mistakesCount: Int = 0,
     val isGenerating: Boolean = false,
     val generatedQuestions: List<GeneratedQuestion> = emptyList(),
     val showGenerationDialog: Boolean = false,

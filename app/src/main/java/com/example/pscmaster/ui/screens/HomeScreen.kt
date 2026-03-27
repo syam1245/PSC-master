@@ -118,7 +118,7 @@ fun HomeScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(150.dp), // Reduced from 180dp to fit more content
+                    .height(150.dp),
                 shape = RoundedCornerShape(28.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
@@ -195,9 +195,9 @@ fun HomeScreen(
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             )
                             StatItem(
-                                icon = Icons.Rounded.TaskAlt,
-                                value = "${uiState.weeklyStats.total}",
-                                label = "Attempts",
+                                icon = Icons.Rounded.Warning,
+                                value = "${uiState.mistakesCount}",
+                                label = "Mistakes",
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             )
                         }
@@ -315,7 +315,7 @@ fun HomeMenuButton(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(80.dp), // Reduced from 90dp to fit all cards
+            .height(80.dp),
         shape = RoundedCornerShape(20.dp),
         color = containerColor,
         tonalElevation = 1.dp
