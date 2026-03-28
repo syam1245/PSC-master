@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -58,8 +59,13 @@ fun QuizScreen(
                     ) 
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    IconButton(onClick = {
+                        if (uiState.isConfiguring) onNavigateBack() else viewModel.resetToConfig()
+                    }) {
+                        Icon(
+                            if (uiState.isConfiguring) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack, 
+                            contentDescription = "Back"
+                        )
                     }
                 }
             )
@@ -74,7 +80,8 @@ fun QuizScreen(
                     onToggleRevision = viewModel::onToggleRevision,
                     onToggleAdaptiveMode = viewModel::onToggleAdaptiveMode,
                     onToggleAiVariation = viewModel::onToggleAiVariation,
-                    onStart = viewModel::startPractice
+                    onStart = viewModel::startPractice,
+                    onResume = if (configState.hasActiveSession) viewModel::resumeSession else null
                 )
             } else if (uiState.isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -85,10 +92,10 @@ fun QuizScreen(
                     score = uiState.score,
                     total = uiState.questions.size,
                     answeredCount = uiState.answeredIndices.size,
-                    onBack = onNavigateBack
+                    onBack = { viewModel.resetToConfig() }
                 )
             } else if (uiState.questions.isEmpty()) {
-                EmptyQuizState(onNavigateBack)
+                EmptyQuizState(onBack = { viewModel.resetToConfig() })
             } else {
                 QuizContent(uiState, viewModel)
             }
@@ -207,6 +214,17 @@ fun QuestionPage(
 ) {
     val haptic = LocalHapticFeedback.current
     val isAnswered = selectedOption != null
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    if (showEditDialog) {
+        OnTheFlyEditDialog(
+            question = question,
+            onDismiss = { showEditDialog = false },
+            onSave = { updatedQuestion ->
+                viewModel.updateQuestion(updatedQuestion)
+            }
+        )
+    }
 
     // Calculate dynamic scaling to help fit content
     val questionLength = question.questionText.length + (aiVariation?.length ?: 0)
@@ -262,8 +280,14 @@ fun QuestionPage(
             }
 
             Spacer(Modifier.weight(1f))
-                TextButton(onClick = onSkip, contentPadding = PaddingValues(0.dp)) {
-                    Icon(if (isSkipped) Icons.Default.Refresh else Icons.Default.SkipNext, null, modifier = Modifier.size(18.dp))
+            IconButton(
+                onClick = { showEditDialog = true }, 
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit Question", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            }
+            TextButton(onClick = onSkip, contentPadding = PaddingValues(0.dp)) {
+                Icon(if (isSkipped) Icons.Default.Refresh else Icons.Default.SkipNext, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(if (isSkipped) "SKIPPED" else "SKIP", style = MaterialTheme.typography.labelLarge)
                 }
@@ -535,7 +559,7 @@ fun QuizResultView(score: Int, total: Int, answeredCount: Int, onBack: () -> Uni
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("BACK TO DASHBOARD")
+            Text("FINISH SESSION")
         }
     }
 }
@@ -548,7 +572,8 @@ fun PracticeConfigurator(
     onToggleRevision: (Boolean) -> Unit,
     onToggleAdaptiveMode: (Boolean) -> Unit,
     onToggleAiVariation: (Boolean) -> Unit,
-    onStart: () -> Unit
+    onStart: () -> Unit,
+    onResume: (() -> Unit)?
 ) {
     val haptic = LocalHapticFeedback.current
     
@@ -557,13 +582,13 @@ fun PracticeConfigurator(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Smart Revision Card
             ConfigCard(
                 title = "SMART REVISION",
-                description = "Spaced Repetition (3d, 1w, 2w, 1m) based on your weak subjects.",
+                description = "SRS logic (3d, 1w, 2w, 1m) for weak subjects.",
                 icon = Icons.Default.AutoAwesome,
                 checked = configState.isRevisionMode,
                 onCheckedChange = onToggleRevision,
@@ -573,7 +598,7 @@ fun PracticeConfigurator(
             // Adaptive Engine Card
             ConfigCard(
                 title = "ADAPTIVE ENGINE",
-                description = "Focuses on your weak areas and ensures you see new questions within 3 sessions.",
+                description = "Ensures new items appear within 3 sessions.",
                 icon = Icons.Default.Psychology,
                 checked = configState.isAdaptiveMode,
                 onCheckedChange = onToggleAdaptiveMode,
@@ -584,57 +609,41 @@ fun PracticeConfigurator(
             if (!configState.isRevisionMode) {
                 Text(
                     "MANUAL SETUP", 
-                    style = MaterialTheme.typography.labelLarge, 
+                    style = MaterialTheme.typography.labelMedium, 
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                 )
                 
-                // Shuffle Card - Minimal
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Shuffle, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(12.dp))
-                            Text("Shuffle Questions", style = MaterialTheme.typography.bodyLarge)
-                        }
-                        Switch(
-                            checked = configState.isShuffleEnabled, 
-                            onCheckedChange = { 
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onToggleShuffle(it) 
-                            }
-                        )
-                    }
-                }
+                // Shuffle Card - Minimalized
+                ConfigCard(
+                    title = "SHUFFLE QUESTIONS",
+                    description = "Randomize question and option order.",
+                    icon = Icons.Default.Shuffle,
+                    checked = configState.isShuffleEnabled,
+                    onCheckedChange = onToggleShuffle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                )
 
                 Text(
                     "SELECT SUBJECTS", 
-                    style = MaterialTheme.typography.labelLarge, 
+                    style = MaterialTheme.typography.labelMedium, 
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                 )
                 
                 if (configState.availableSubjects.isEmpty()) {
                     Text(
                         "No subjects available. Add questions first.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     // Subjects Grid using FlowRow
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         configState.availableSubjects.forEach { subject ->
                             val isSelected = configState.selectedSubjects.contains(subject)
@@ -647,20 +656,20 @@ fun PracticeConfigurator(
                                 label = { 
                                     Text(
                                         subject, 
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.bodyMedium
+                                        modifier = Modifier.padding(horizontal = 2.dp),
+                                        style = MaterialTheme.typography.labelLarge
                                     ) 
                                 },
                                 leadingIcon = if (isSelected) {
-                                    { Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp)) }
+                                    { Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp)) }
                                 } else null,
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 border = FilterChipDefaults.filterChipBorder(
                                     enabled = true,
                                     selected = isSelected,
-                                    selectedBorderWidth = 2.dp
+                                    selectedBorderWidth = 1.5.dp
                                 ),
-                                modifier = Modifier.heightIn(min = 44.dp)
+                                modifier = Modifier.heightIn(min = 36.dp)
                             )
                         }
                     }
@@ -669,7 +678,7 @@ fun PracticeConfigurator(
                 if (configState.selectedSubjects.isEmpty() && configState.availableSubjects.isNotEmpty()) {
                     Text(
                         "Includes all subjects by default.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -677,8 +686,8 @@ fun PracticeConfigurator(
 
             // AI Variations Card
             ConfigCard(
-                title = "QUESTION VARIATIONS",
-                description = "AI rephrases questions for better understanding. (English & Malayalam)",
+                title = "AI REPHRASING",
+                description = "Generate variations to prevent rote learning.",
                 icon = Icons.Default.AutoAwesome,
                 checked = configState.isAiVariationEnabled,
                 onCheckedChange = onToggleAiVariation,
@@ -690,27 +699,51 @@ fun PracticeConfigurator(
         // Bottom Start Button
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            tonalElevation = 8.dp,
-            shadowElevation = 8.dp
+            tonalElevation = 4.dp,
+            shadowElevation = 4.dp
         ) {
-            Button(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onStart()
-                },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp)
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp)
+                    .padding(vertical = 12.dp, horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.PlayArrow, null)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (configState.isRevisionMode) "INITIALIZE AI REVISION" else "START PRACTICE SESSION",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
+                if (onResume != null) {
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onResume()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Icon(Icons.Default.History, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("RESUME ACTIVE SESSION", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onStart()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (configState.isRevisionMode) "INITIALIZE REVISION" else "START PRACTICE SESSION",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -729,29 +762,30 @@ fun ConfigCard(
     val haptic = LocalHapticFeedback.current
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (checked) color.copy(alpha = 0.1f) else containerColor
         ),
-        border = if (checked) androidx.compose.foundation.BorderStroke(2.dp, color) else null
+        border = if (checked) androidx.compose.foundation.BorderStroke(1.5.dp, color) else null
     ) {
         Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+                    Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
-                Spacer(Modifier.height(4.dp))
                 Text(
                     description, 
-                    style = MaterialTheme.typography.bodySmall, 
+                    style = MaterialTheme.typography.labelSmall, 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 16.sp
+                    lineHeight = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Switch(
@@ -760,6 +794,7 @@ fun ConfigCard(
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onCheckedChange(it) 
                 },
+                modifier = Modifier.scale(0.8f),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = color,
                     checkedTrackColor = color.copy(alpha = 0.3f)
@@ -767,4 +802,94 @@ fun ConfigCard(
             )
         }
     }
+}
+
+@Composable
+fun OnTheFlyEditDialog(
+    question: Question,
+    onDismiss: () -> Unit,
+    onSave: (Question) -> Unit
+) {
+    var subject by remember { mutableStateOf(question.subject) }
+    var questionText by remember { mutableStateOf(question.questionText) }
+    // Clone options array locally to avoid shared referencing issues
+    var options by remember(question.options) { mutableStateOf(question.options.toList()) }
+    var correctIndex by remember { mutableStateOf(question.correctIndex) }
+    var explanation by remember { mutableStateOf(question.explanation) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit on the Go", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = subject,
+                    onValueChange = { subject = it },
+                    label = { Text("Subject") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                OutlinedTextField(
+                    value = questionText,
+                    onValueChange = { questionText = it },
+                    label = { Text("Question") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
+                Text("Options", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                options.forEachIndexed { index, option ->
+                    OutlinedTextField(
+                        value = option,
+                        onValueChange = { newText ->
+                            val newOptions = options.toMutableList()
+                            newOptions[index] = newText
+                            options = newOptions
+                        },
+                        label = { Text("Option ${index + 1}") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        leadingIcon = {
+                            RadioButton(
+                                selected = correctIndex == index,
+                                onClick = { correctIndex = index }
+                            )
+                        }
+                    )
+                }
+                OutlinedTextField(
+                    value = explanation,
+                    onValueChange = { explanation = it },
+                    label = { Text("Explanation (Optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    minLines = 2
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(
+                    question.copy(
+                        subject = subject,
+                        questionText = questionText,
+                        options = options,
+                        correctIndex = correctIndex,
+                        explanation = explanation
+                    )
+                )
+                onDismiss()
+            }) { Text("Save Changes") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        shape = RoundedCornerShape(24.dp)
+    )
 }

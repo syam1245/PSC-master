@@ -15,7 +15,7 @@ import com.example.pscmaster.data.entity.*
         QuestionBadgeState::class,
         UserPerformanceMetrics::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -26,6 +26,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun metricsDao(): PerformanceMetricsDao
 
     companion object {
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_performance_metrics ADD COLUMN isShownInCycle INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_user_performance_metrics_isShownInCycle ON user_performance_metrics (isShownInCycle)")
+            }
+        }
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE questions ADD COLUMN nextReviewTimestamp INTEGER NOT NULL DEFAULT 0")

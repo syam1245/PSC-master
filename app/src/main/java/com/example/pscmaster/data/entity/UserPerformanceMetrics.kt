@@ -8,7 +8,8 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "user_performance_metrics",
     indices = [
-        Index(value = ["nextReviewTimestamp"])
+        Index(value = ["nextReviewTimestamp"]),
+        Index(value = ["isShownInCycle"])
     ],
     foreignKeys = [
         ForeignKey(
@@ -30,5 +31,6 @@ data class UserPerformanceMetrics(
     val easeFactor: Double = 2.5,
     val lastIntervalDays: Int = 0,
     val nextReviewTimestamp: Long = 0,
-    val intervalIndex: Int = 0 
+    val intervalIndex: Int = 0,
+    val isShownInCycle: Int = 0 
 )

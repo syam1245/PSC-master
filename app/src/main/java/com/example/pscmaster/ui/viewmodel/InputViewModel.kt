@@ -10,9 +10,7 @@ import com.example.pscmaster.data.entity.*
 import com.example.pscmaster.data.repository.PSCRepository
 import com.example.pscmaster.data.local.SubjectCount
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.example.pscmaster.api.AiService
@@ -30,45 +28,33 @@ class InputViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(InputUiState())
-    val uiState = _uiState.asStateFlow()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val questionsFlow = repository.getAllQuestions().map { repository.getAllQuestionsWithMetadata() }
+
+    val uiState = combine(
+        _uiState,
+        repository.getQuestionCount(),
+        repository.getAllSubjects(),
+        repository.getWeakSubjects(),
+        combine(repository.getWeeklyProgress(), questionsFlow) { a, b -> Pair(a, b) }
+    ) { state, count, subjects, weak, pair ->
+        state.copy(
+            totalQuestionsCount = count,
+            availableSubjects = (setOf("AI POOL") + subjects.toSet()).toList(), // Safeguard
+            weakSubjects = weak,
+            mistakesCount = weak.sumOf { it.count },
+            weeklyStats = pair.first,
+            recentQuestions = pair.second
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = InputUiState()
+    )
 
     private val gson = Gson()
 
     init {
-        // Lightweight count for HomeScreen stats
-        viewModelScope.launch {
-            repository.getQuestionCount().collectLatest { count ->
-                _uiState.value = _uiState.value.copy(totalQuestionsCount = count)
-            }
-        }
-        // Mistakes count is now handled in the weakSubjects observer for perfect sync
-
-        // Full question list for ManageQuestionsScreen
-        viewModelScope.launch {
-            repository.getAllQuestions().collectLatest { 
-                val withMetadata = repository.getAllQuestionsWithMetadata()
-                _uiState.value = _uiState.value.copy(recentQuestions = withMetadata)
-            }
-        }
-        viewModelScope.launch {
-            repository.getAllSubjects().collectLatest { subjects ->
-                _uiState.value = _uiState.value.copy(availableSubjects = subjects)
-            }
-        }
-        viewModelScope.launch {
-            repository.getWeakSubjects().collectLatest { weak ->
-                val totalMistakes = weak.sumOf { it.count }
-                _uiState.value = _uiState.value.copy(
-                    weakSubjects = weak,
-                    mistakesCount = totalMistakes
-                )
-            }
-        }
-        viewModelScope.launch {
-            repository.getWeeklyProgress().collectLatest { stats ->
-                _uiState.value = _uiState.value.copy(weeklyStats = stats)
-            }
-        }
         checkAuthStatus()
     }
 

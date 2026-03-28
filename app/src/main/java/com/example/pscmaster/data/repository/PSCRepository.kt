@@ -19,6 +19,7 @@ interface PSCRepository {
     fun getQuestionCount(): Flow<Int>
     suspend fun getQuestionsForPractice(subjects: List<String>, shuffle: Boolean): List<Question>
     suspend fun getRevisionQuestions(): List<Question>
+    suspend fun getQuestionsByIds(ids: List<Long>): List<Question>
     
     // Performance and SRS
     suspend fun savePerformance(performance: UserPerformance)
@@ -28,6 +29,7 @@ interface PSCRepository {
     suspend fun getWrongAnswers(): List<UserPerformance>
     fun getWeakSubjects(): Flow<List<SubjectCount>>
     fun getWeeklyProgress(): Flow<com.example.pscmaster.data.local.WeeklyStats>
+    suspend fun calculateStudyStreak(): Int
     suspend fun getCachedInsights(hash: Int): AiResult?
     suspend fun saveCachedInsights(hash: Int, result: AiResult)
     suspend fun getQuestionsWithMistakes(): List<QuestionWithMetadata>

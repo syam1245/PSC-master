@@ -25,7 +25,8 @@ class AnalyticsViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 val weakSubjects = repository.getWeakSubjects().first()
-                val dataHash = weakSubjects.hashCode()
+                val streak = repository.calculateStudyStreak()
+                val dataHash = weakSubjects.hashCode() + streak
 
                 if (!forceRefresh) {
                     val cachedResult = repository.getCachedInsights(dataHash)
@@ -34,6 +35,7 @@ class AnalyticsViewModel @Inject constructor(
                             insights = cachedResult.insights,
                             provider = cachedResult.provider,
                             subjectStats = weakSubjects,
+                            studyStreak = streak,
                             isLoading = false
                         )
                         return@launch
@@ -51,6 +53,7 @@ class AnalyticsViewModel @Inject constructor(
                     insights = result.insights,
                     provider = result.provider,
                     subjectStats = weakSubjects,
+                    studyStreak = streak,
                     isLoading = false
                 )
             } catch (e: Exception) {
@@ -68,5 +71,6 @@ data class AnalyticsUiState(
     val insights: String = "",
     val provider: String = "",
     val subjectStats: List<com.example.pscmaster.data.local.SubjectCount> = emptyList(),
+    val studyStreak: Int = 0,
     val isLoading: Boolean = false
 )

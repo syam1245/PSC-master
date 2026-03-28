@@ -89,6 +89,10 @@ class PSCRepositoryImpl @Inject constructor(
         return questionDao.getAllQuestions()
     }
 
+    override suspend fun getQuestionsByIds(ids: List<Long>): List<Question> = withContext(Dispatchers.IO) {
+        questionDao.getQuestionsByIds(ids)
+    }
+
     override suspend fun getAllQuestionsWithMetadata(): List<QuestionWithMetadata> = withContext(Dispatchers.IO) {
         questionDao.getAllQuestionsWithMetadata()
     }
@@ -146,27 +150,25 @@ class PSCRepositoryImpl @Inject constructor(
         var intervalDays: Int
         
         if (isCorrect) {
-            // SM-2 Correct Logic
+            // SM-2 Correct Logic (Quality = 4)
             intervalDays = when (consecutiveCorrect) {
                 1 -> 1
                 2 -> 6
-                else -> (metrics.lastIntervalDays * easeFactor).toInt().coerceAtLeast(1)
+                else -> Math.ceil(metrics.lastIntervalDays * easeFactor).toInt().coerceAtLeast(1)
             }
-            
-            // Adjust Ease Factor (Simplified SM-2)
-            // Range 1.3 to 3.0. Quality 4 for Correct.
-            easeFactor += (0.1 - (5 - 4) * (0.08 + (5 - 4) * 0.02))
+            // Quality 4: Ease Factor remains same (EF' = EF + 0)
         } else {
-            // SM-2 Strict Fail Logic
+            // SM-2 Fail Logic (Quality = 2)
             consecutiveCorrect = 0
             intervalDays = 1 // Reset to tomorrow
             
-            // Ease Factor hit for failing (Strict)
-            easeFactor -= 0.2
+            // Adjust Ease Factor (EF' = EF + (0.1 - (3)* (0.14)) = EF - 0.32)
+            // standard SM-2 formula with q=2
+            easeFactor -= 0.32
         }
         
-        // Final Bounds
-        easeFactor = easeFactor.coerceIn(1.3, 3.0)
+        // Ensure Ease Factor doesn't drop below 1.3 (Standard SM-2 boundary)
+        easeFactor = easeFactor.coerceAtLeast(1.3).coerceAtMost(3.0)
         
         val nextReviewTs = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(intervalDays.toLong())
         
@@ -213,6 +215,44 @@ class PSCRepositoryImpl @Inject constructor(
     override fun getWeeklyProgress(): Flow<com.example.pscmaster.data.local.WeeklyStats> {
         val weekAgo = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000)
         return performanceDao.getWeeklyStats(weekAgo)
+    }
+
+    override suspend fun calculateStudyStreak(): Int = withContext(Dispatchers.IO) {
+        val timestamps = performanceDao.getAllTimestamps()
+        if (timestamps.isEmpty()) return@withContext 0
+
+        val uniqueDays = timestamps.map { ts ->
+            val zoneOffset = java.util.TimeZone.getDefault().getOffset(ts)
+            (ts + zoneOffset) / (1000 * 60 * 60 * 24)
+        }.distinct().sortedDescending()
+
+        if (uniqueDays.isEmpty()) return@withContext 0
+
+        val todayStr = run {
+            val curr = System.currentTimeMillis()
+            val tzOffset = java.util.TimeZone.getDefault().getOffset(curr)
+            (curr + tzOffset) / (1000 * 60 * 60 * 24)
+        }
+        
+        var streak = 0
+        var expectedDay = todayStr
+
+        if (uniqueDays[0] != todayStr && uniqueDays[0] != todayStr - 1) {
+            return@withContext 0
+        }
+        if (uniqueDays[0] == todayStr - 1) {
+            expectedDay = todayStr - 1
+        }
+
+        for (day in uniqueDays) {
+            if (day == expectedDay) {
+                streak++
+                expectedDay--
+            } else if (day < expectedDay) {
+                break
+            }
+        }
+        streak
     }
 
     override suspend fun getCachedInsights(hash: Int): AiResult? = withContext(Dispatchers.IO) {
@@ -277,25 +317,8 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override suspend fun generateAdaptiveQuiz(size: Int, subject: String?, newQuestionRatio: Float): List<Question> = withContext(Dispatchers.IO) {
-        val newCount = (size * newQuestionRatio).toInt()
-        val repeatCount = size - newCount
-
-        val candidates = if (subject == null) {
-            questionDao.getNewCandidateQuestions(newCount)
-        } else {
-            questionDao.getNewCandidateQuestionsBySubject(subject, newCount)
-        }
-
-        val newOnes = candidates.map { it.question }
-        val excludeIds = newOnes.map { it.id }.ifEmpty { listOf(-1L) }
-        
-        val repeats = if (subject == null) {
-            questionDao.getRandomQuestionsExclude(excludeIds, repeatCount)
-        } else {
-            questionDao.getRandomQuestionsExcludeBySubject(subject, excludeIds, repeatCount)
-        }
-
-        (newOnes + repeats).shuffled()
+        val currentTime = System.currentTimeMillis()
+        questionDao.fetchAndMarkAdaptiveQuestions(size, subject, currentTime).shuffled()
     }
 
     override suspend fun importQuestionsFromCsv(uri: Uri): Int = withContext(Dispatchers.IO) {

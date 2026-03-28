@@ -1,6 +1,7 @@
 package com.example.pscmaster
 
 import com.example.pscmaster.data.entity.Question
+import com.example.pscmaster.data.entity.UserPerformanceMetrics
 import com.example.pscmaster.data.local.QuestionDao
 import com.example.pscmaster.data.repository.PSCRepositoryImpl
 import com.example.pscmaster.data.local.AppDatabase
@@ -47,29 +48,35 @@ class SrsLogicTest {
 
     @Test
     fun `test correct answer increases srs interval`() = runTest {
-        val initialQuestion = Question(id = 1, intervalIndex = 0, questionText = "Test")
-        coEvery { questionDao.getQuestionById(1) } returns initialQuestion
+        val initialQuestion = Question(id = 1, questionText = "Test")
+        val initialMetrics = UserPerformanceMetrics(questionId = 1, intervalIndex = 0)
         
-        val updatedQuestionSlot = slot<Question>()
-        coEvery { questionDao.updateQuestion(capture(updatedQuestionSlot)) } returns Unit
+        coEvery { questionDao.getQuestionById(1) } returns initialQuestion
+        coEvery { metricsDao.getMetricsForQuestion(1) } returns initialMetrics
+        
+        val updatedMetricsSlot = slot<UserPerformanceMetrics>()
+        coEvery { metricsDao.upsertMetrics(capture(updatedMetricsSlot)) } returns Unit
         
         repository.updateSrs(1, true)
         
-        assertEquals(1, updatedQuestionSlot.captured.intervalIndex)
-        assertTrue(updatedQuestionSlot.captured.nextReviewTimestamp > 1000000L)
+        assertEquals(1, updatedMetricsSlot.captured.intervalIndex)
+        assertTrue(updatedMetricsSlot.captured.nextReviewTimestamp > 1000000L)
     }
 
     @Test
     fun `test wrong answer resets srs interval`() = runTest {
-        val initialQuestion = Question(id = 1, intervalIndex = 3, questionText = "Test")
-        coEvery { questionDao.getQuestionById(1) } returns initialQuestion
+        val initialQuestion = Question(id = 1, questionText = "Test")
+        val initialMetrics = UserPerformanceMetrics(questionId = 1, intervalIndex = 3, consecutiveCorrect = 3)
         
-        val updatedQuestionSlot = slot<Question>()
-        coEvery { questionDao.updateQuestion(capture(updatedQuestionSlot)) } returns Unit
+        coEvery { questionDao.getQuestionById(1) } returns initialQuestion
+        coEvery { metricsDao.getMetricsForQuestion(1) } returns initialMetrics
+        
+        val updatedMetricsSlot = slot<UserPerformanceMetrics>()
+        coEvery { metricsDao.upsertMetrics(capture(updatedMetricsSlot)) } returns Unit
         
         repository.updateSrs(1, false)
         
-        assertEquals(0, updatedQuestionSlot.captured.intervalIndex)
-        assertEquals(1000000L + 86400000L, updatedQuestionSlot.captured.nextReviewTimestamp)
+        assertEquals(0, updatedMetricsSlot.captured.intervalIndex)
+        assertEquals(1000000L + 86400000L, updatedMetricsSlot.captured.nextReviewTimestamp)
     }
 }

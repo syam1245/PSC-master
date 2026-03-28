@@ -44,6 +44,9 @@ interface PerformanceDao {
     @Query("SELECT COUNT(CASE WHEN isCorrect = 1 THEN 1 END) as correct, COUNT(*) as total FROM user_performance WHERE timestamp >= :since")
     fun getWeeklyStats(since: Long): Flow<WeeklyStats>
 
+    @Query("SELECT timestamp FROM user_performance ORDER BY timestamp DESC")
+    suspend fun getAllTimestamps(): List<Long>
+
     @Query("DELETE FROM user_performance WHERE timestamp < :threshold")
     suspend fun deleteOldPerformanceLogs(threshold: Long)
 }

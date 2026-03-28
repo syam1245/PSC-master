@@ -129,6 +129,37 @@ fun AnalyticsScreen(
                     }
                 }
             } else {
+                // Streak Widget
+                if (uiState.studyStreak > 0) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFFFF9800).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🔥", fontSize = 32.sp)
+                            Spacer(Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    "${uiState.studyStreak} Day Streak!",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFFE65100)
+                                )
+                                Text(
+                                    "You're on fire! Keep practicing daily.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFE65100).copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // 1. Weak Subjects Visualization
                 if (uiState.subjectStats.isNotEmpty()) {
                     Text(
