@@ -62,17 +62,6 @@ class QuizViewModel @Inject constructor(
 
     fun updateCurrentPage(index: Int) {
         _uiState.value = _uiState.value.copy(currentQuestionIndex = index)
-        // Optimization: Prefetch AI variation for the next question
-        if (_configState.value.isAiVariationEnabled) {
-            prefetchAiVariation(index + 1)
-        }
-    }
-
-    private fun prefetchAiVariation(index: Int) {
-        val questions = _uiState.value.questions
-        if (index >= 0 && index < questions.size) {
-            generateAiVariation(index)
-        }
     }
 
     fun generateAiVariation(questionIndex: Int) {

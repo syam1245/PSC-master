@@ -65,24 +65,35 @@ class GenerateAdaptiveQuizUseCase @Inject constructor(
     }
 
     private fun calculateScore(metadata: QuestionWithMetadata): Double {
-        val metrics = metadata.metrics ?: return 100.0 // Default high score for no history
+        val metrics = metadata.metrics ?: return 200.0 // High priority for new or untracked
+        val question = metadata.question
         
+        val now = System.currentTimeMillis()
+        val nextReviewTs = metrics.nextReviewTimestamp
+        val isOverdue = nextReviewTs > 0 && nextReviewTs < now
+        
+        // 1. SRS Base Score
+        // Overdue questions get a massive boost to ensure they are reviewed
+        val srsScore = if (isOverdue) {
+            val overdueHours = (now - nextReviewTs) / (1000.0 * 60 * 60)
+            500.0 + overdueHours // More overdue = more priority
+        } else {
+            0.0
+        }
+        
+        // 2. Accuracy & Difficulty
         val correct = metrics.correctAttempts.toDouble()
         val total = metrics.totalAttempts.toDouble()
         val accuracy = if (total > 0) correct / total else 0.5
+        val accuracyScore = (1.0 - accuracy) * 100.0 // Mistakes are high priority
         
-        // Signals
-        val accuracyScore = (1.0 - accuracy) * 40.0 // High error = high priority
+        // 3. Recency & Fatigue
+        val lastAttemptHours = (now - metrics.lastAttemptTimestamp) / (1000.0 * 60 * 60)
+        val fatiguePenalty = if (lastAttemptHours < 2.0) -1000.0 else 0.0 // Strict fatigue limit
         
-        val lastAttemptHours = (System.currentTimeMillis() - metrics.lastAttemptTimestamp) / (1000.0 * 60 * 60)
-        val recencyScore = ln(lastAttemptHours + 1.0) * 5.0
+        // 4. Complexity/Hard Bonus
+        val hardBonus = if (metrics.difficultyFlag == 1) 50.0 else 0.0
         
-        val fatiguePenalty = if (lastAttemptHours < 1.0) -100.0 else 0.0 // Don't repeat within 1 hour
-        
-        val hardBonus = if (metrics.difficultyFlag == 1) 20.0 else 0.0
-        
-        val streakPenalty = metrics.consecutiveCorrect * -10.0
-        
-        return 100.0 + accuracyScore + recencyScore + fatiguePenalty + hardBonus + streakPenalty
+        return srsScore + accuracyScore + hardBonus + fatiguePenalty
     }
 }

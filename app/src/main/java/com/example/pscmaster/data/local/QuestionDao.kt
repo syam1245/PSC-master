@@ -30,6 +30,12 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE subject IN (:subjects)")
     suspend fun getQuestionsBySubjects(subjects: List<String>): List<Question>
 
+    @Query("SELECT * FROM questions WHERE id NOT IN (:excludeIds) ORDER BY RANDOM() LIMIT :limit")
+    suspend fun getRandomQuestionsExclude(excludeIds: List<Long>, limit: Int): List<Question>
+
+    @Query("SELECT * FROM questions WHERE subject = :subject AND id NOT IN (:excludeIds) ORDER BY RANDOM() LIMIT :limit")
+    suspend fun getRandomQuestionsExcludeBySubject(subject: String, excludeIds: List<Long>, limit: Int): List<Question>
+
     @Query("SELECT * FROM questions")
     suspend fun getAllQuestionsList(): List<Question>
 
@@ -51,7 +57,11 @@ interface QuestionDao {
     @Query("UPDATE questions SET subject = :newName WHERE subject = :oldName")
     suspend fun renameSubject(oldName: String, newName: String)
 
-    @Query("SELECT * FROM questions WHERE nextReviewTimestamp > 0 AND nextReviewTimestamp <= :currentTime")
+    @Query("""
+        SELECT q.* FROM questions q
+        JOIN user_performance_metrics m ON q.id = m.questionId
+        WHERE m.nextReviewTimestamp > 0 AND m.nextReviewTimestamp <= :currentTime
+    """)
     suspend fun getScheduledRevisionQuestions(currentTime: Long): List<Question>
 
     @Transaction
@@ -71,14 +81,28 @@ interface QuestionDao {
     suspend fun getNewCandidateQuestions(limit: Int): List<QuestionWithMetadata>
 
     @Transaction
+    @Query("""
+        SELECT * FROM questions 
+        WHERE subject = :subject AND id NOT IN (SELECT questionId FROM question_badge_state WHERE state = 3)
+        ORDER BY RANDOM() LIMIT :limit
+    """)
+    suspend fun getNewCandidateQuestionsBySubject(subject: String, limit: Int): List<QuestionWithMetadata>
+
+    @Transaction
     @Query("SELECT * FROM questions WHERE subject = :subject")
     suspend fun getQuestionsWithMetadataBySubject(subject: String): List<QuestionWithMetadata>
 
     @Transaction
     @Query("""
-        SELECT * FROM questions 
-        WHERE id IN (SELECT questionId FROM user_performance_metrics WHERE correctAttempts < totalAttempts)
-        ORDER BY timestamp DESC
+        SELECT q.* FROM questions q
+        JOIN (
+            SELECT questionId, MAX(timestamp) as maxTs
+            FROM user_performance
+            GROUP BY questionId
+        ) latest ON q.id = latest.questionId
+        JOIN user_performance up ON up.questionId = latest.questionId AND up.timestamp = latest.maxTs
+        WHERE up.isCorrect = 0
+        ORDER BY up.timestamp DESC
     """)
     suspend fun getQuestionsWithMistakes(): List<QuestionWithMetadata>
 }

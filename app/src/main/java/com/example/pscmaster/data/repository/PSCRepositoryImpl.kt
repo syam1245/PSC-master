@@ -137,25 +137,65 @@ class PSCRepositoryImpl @Inject constructor(
 
     override suspend fun updateSrs(questionId: Long, isCorrect: Boolean) = withContext(Dispatchers.IO) {
         val question = questionDao.getQuestionById(questionId) ?: return@withContext
+        val metrics = metricsDao.getMetricsForQuestion(questionId) ?: UserPerformanceMetrics(questionId = questionId)
         
-        val newIntervalIndex: Int
-        val nextReviewTimestamp: Long
-
+        var easeFactor = metrics.easeFactor
+        var consecutiveCorrect = if (isCorrect) metrics.consecutiveCorrect + 1 else 0
+        val totalAttempts = metrics.totalAttempts + 1
+        val correctAttempts = if (isCorrect) metrics.correctAttempts + 1 else metrics.correctAttempts
+        var intervalDays: Int
+        
         if (isCorrect) {
-            newIntervalIndex = (question.intervalIndex + 1).coerceAtMost(srsIntervals.size - 1)
-            val daysToAdd = srsIntervals[newIntervalIndex]
-            nextReviewTimestamp = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(daysToAdd)
+            // SM-2 Correct Logic
+            intervalDays = when (consecutiveCorrect) {
+                1 -> 1
+                2 -> 6
+                else -> (metrics.lastIntervalDays * easeFactor).toInt().coerceAtLeast(1)
+            }
+            
+            // Adjust Ease Factor (Simplified SM-2)
+            // Range 1.3 to 3.0. Quality 4 for Correct.
+            easeFactor += (0.1 - (5 - 4) * (0.08 + (5 - 4) * 0.02))
         } else {
-            newIntervalIndex = 0
-            nextReviewTimestamp = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(1)
+            // SM-2 Strict Fail Logic
+            consecutiveCorrect = 0
+            intervalDays = 1 // Reset to tomorrow
+            
+            // Ease Factor hit for failing (Strict)
+            easeFactor -= 0.2
         }
-
+        
+        // Final Bounds
+        easeFactor = easeFactor.coerceIn(1.3, 3.0)
+        
+        val nextReviewTs = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(intervalDays.toLong())
+        
+        // 1. Update Metrics
+        metricsDao.upsertMetrics(metrics.copy(
+            totalAttempts = totalAttempts,
+            correctAttempts = correctAttempts,
+            consecutiveCorrect = consecutiveCorrect,
+            easeFactor = easeFactor,
+            lastIntervalDays = intervalDays,
+            lastAttemptTimestamp = System.currentTimeMillis(),
+            nextReviewTimestamp = nextReviewTs,
+            intervalIndex = when (consecutiveCorrect) {
+                 0 -> 0
+                 1 -> 1
+                 else -> metrics.intervalIndex + 1
+            }
+        ))
+        
+        // 2. Update Question (Content Versioning)
         val updatedQuestion = question.copy(
-            intervalIndex = newIntervalIndex,
-            nextReviewTimestamp = nextReviewTimestamp
+            version = question.version + 1
         )
         questionDao.updateQuestion(updatedQuestion)
         pushQuestionToFirebase(updatedQuestion)
+    }
+
+    override suspend fun cleanupOldPerformanceLogs(thresholdTimestamp: Long) {
+        performanceDao.deleteOldPerformanceLogs(thresholdTimestamp)
     }
 
     override fun getAllPerformance(): Flow<List<UserPerformance>> {
@@ -225,26 +265,12 @@ class PSCRepositoryImpl @Inject constructor(
             }
             sessionDao.bulkUpsertBadgeState(badgeStates)
 
-            // 3. Update Performance Metrics
+            // 3. Update Performance & SRS
             performances.forEach { perf ->
-                val currentMetrics = metricsDao.getMetricsForQuestion(perf.questionId)
-                    ?: UserPerformanceMetrics(questionId = perf.questionId)
-                
-                val totalAttempts = currentMetrics.totalAttempts + 1
-                val correctAttempts = if (perf.isCorrect) currentMetrics.correctAttempts + 1 else currentMetrics.correctAttempts
-                val consecutiveCorrect = if (perf.isCorrect) currentMetrics.consecutiveCorrect + 1 else 0
-                
-                metricsDao.upsertMetrics(currentMetrics.copy(
-                    totalAttempts = totalAttempts,
-                    correctAttempts = correctAttempts,
-                    lastAttemptTimestamp = System.currentTimeMillis(),
-                    consecutiveCorrect = consecutiveCorrect
-                ))
-
-                // Also update the legacy SRS system
+                // SRS now handles all metric logging (consecutive, attempts, etc.)
                 updateSrs(perf.questionId, perf.isCorrect)
                 
-                // Save to legacy performance table
+                // Save to legacy performance history table
                 performanceDao.insertPerformance(perf)
             }
         }
@@ -257,24 +283,16 @@ class PSCRepositoryImpl @Inject constructor(
         val candidates = if (subject == null) {
             questionDao.getNewCandidateQuestions(newCount)
         } else {
-            questionDao.getQuestionsWithMetadataBySubject(subject)
-                .filter { (it.badgeState?.state ?: 0) < 3 }
-                .shuffled()
-                .take(newCount)
+            questionDao.getNewCandidateQuestionsBySubject(subject, newCount)
         }
 
         val newOnes = candidates.map { it.question }
+        val excludeIds = newOnes.map { it.id }.ifEmpty { listOf(-1L) }
         
         val repeats = if (subject == null) {
-            questionDao.getAllQuestionsList()
-                .filter { q -> !newOnes.any { it.id == q.id } }
-                .shuffled()
-                .take(repeatCount)
+            questionDao.getRandomQuestionsExclude(excludeIds, repeatCount)
         } else {
-            questionDao.getQuestionsBySubjects(listOf(subject))
-                .filter { q -> !newOnes.any { it.id == q.id } }
-                .shuffled()
-                .take(repeatCount)
+            questionDao.getRandomQuestionsExcludeBySubject(subject, excludeIds, repeatCount)
         }
 
         (newOnes + repeats).shuffled()
@@ -290,9 +308,15 @@ class PSCRepositoryImpl @Inject constructor(
                     }
                     
                     if (row.size >= 7) {
+                        val rawSubject = row[0].trim()
+                        val isAiPool = rawSubject.startsWith("AI POOL", ignoreCase = true) && rawSubject.contains("(")
+                        val finalSubject = if (isAiPool) "AI POOL" else rawSubject
+                        val finalTag = if (isAiPool) rawSubject.substringAfter("(").substringBefore(")").trim() else ""
+                        
                         questionsToInsert.add(
                             Question(
-                                subject = row[0].trim(),
+                                subject = finalSubject,
+                                subjectTag = finalTag,
                                 questionText = row[1].trim(),
                                 options = listOf(row[2].trim(), row[3].trim(), row[4].trim(), row[5].trim()),
                                 correctIndex = (row[6].trim().toIntOrNull() ?: 0).coerceIn(0, 3),
@@ -486,7 +510,8 @@ class PSCRepositoryImpl @Inject constructor(
                         val existing = questionDao.getQuestionByText(question.questionText)
                         if (existing == null) {
                             questionDao.insertQuestion(question.copy(id = 0))
-                        } else if (question.timestamp > existing.timestamp) {
+                        } else if (question.version > existing.version) {
+                            // Version-based conflict resolution
                             questionDao.updateQuestion(question.copy(id = existing.id))
                         }
                     }
@@ -522,20 +547,14 @@ class PSCRepositoryImpl @Inject constructor(
                                     questionDao.insertQuestion(question.copy(id = 0))
                                 }
                                 com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                    val local = questionDao.getQuestionByText(question.questionText)
-                                    if (local != null) {
-                                        if (question.timestamp > local.timestamp) {
-                                            questionDao.updateQuestion(local.copy(
-                                                options = question.options,
-                                                correctIndex = question.correctIndex,
-                                                explanation = question.explanation,
-                                                subject = question.subject,
-                                                timestamp = question.timestamp
-                                            ))
-                                        }
-                                    } else {
-                                        questionDao.insertQuestion(question.copy(id = 0))
+                                val local = questionDao.getQuestionByText(question.questionText)
+                                if (local != null) {
+                                    if (question.version > local.version) {
+                                        questionDao.updateQuestion(question.copy(id = local.id))
                                     }
+                                } else {
+                                    questionDao.insertQuestion(question.copy(id = 0))
+                                }
                                 }
                                 com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
                                     val local = questionDao.getQuestionByText(question.questionText)

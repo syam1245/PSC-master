@@ -41,13 +41,8 @@ class InputViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(totalQuestionsCount = count)
             }
         }
-        // Observe mistakes count
-        viewModelScope.launch {
-            repository.getAllPerformance().collectLatest {
-                val mistakes = repository.getQuestionsWithMistakes().size
-                _uiState.value = _uiState.value.copy(mistakesCount = mistakes)
-            }
-        }
+        // Mistakes count is now handled in the weakSubjects observer for perfect sync
+
         // Full question list for ManageQuestionsScreen
         viewModelScope.launch {
             repository.getAllQuestions().collectLatest { 
@@ -62,7 +57,11 @@ class InputViewModel @Inject constructor(
         }
         viewModelScope.launch {
             repository.getWeakSubjects().collectLatest { weak ->
-                _uiState.value = _uiState.value.copy(weakSubjects = weak)
+                val totalMistakes = weak.sumOf { it.count }
+                _uiState.value = _uiState.value.copy(
+                    weakSubjects = weak,
+                    mistakesCount = totalMistakes
+                )
             }
         }
         viewModelScope.launch {

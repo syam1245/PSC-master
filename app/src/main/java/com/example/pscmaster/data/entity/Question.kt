@@ -9,8 +9,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["questionText"], unique = true),
         Index(value = ["subject"]),
-        Index(value = ["subjectTag"]),
-        Index(value = ["nextReviewTimestamp"])
+        Index(value = ["subjectTag"])
     ]
 )
 data class Question(
@@ -22,6 +21,5 @@ data class Question(
     val correctIndex: Int = 0,
     val explanation: String = "",
     val timestamp: Long = System.currentTimeMillis(),
-    val nextReviewTimestamp: Long = 0,
-    val intervalIndex: Int = 0
+    val version: Int = 1
 )

@@ -23,6 +23,7 @@ interface PSCRepository {
     // Performance and SRS
     suspend fun savePerformance(performance: UserPerformance)
     suspend fun updateSrs(questionId: Long, isCorrect: Boolean)
+    suspend fun cleanupOldPerformanceLogs(thresholdTimestamp: Long)
     fun getAllPerformance(): Flow<List<UserPerformance>>
     suspend fun getWrongAnswers(): List<UserPerformance>
     fun getWeakSubjects(): Flow<List<SubjectCount>>

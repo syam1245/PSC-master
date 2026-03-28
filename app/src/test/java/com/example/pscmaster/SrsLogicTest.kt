@@ -5,6 +5,8 @@ import com.example.pscmaster.data.local.QuestionDao
 import com.example.pscmaster.data.repository.PSCRepositoryImpl
 import com.example.pscmaster.data.local.AppDatabase
 import com.example.pscmaster.data.local.PerformanceDao
+import com.example.pscmaster.data.local.SessionDao
+import com.example.pscmaster.data.local.PerformanceMetricsDao
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import android.content.Context
@@ -13,13 +15,14 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
-import java.io.File
 
 class SrsLogicTest {
 
     private lateinit var repository: PSCRepositoryImpl
     private val questionDao = mockk<QuestionDao>(relaxed = true)
     private val performanceDao = mockk<PerformanceDao>(relaxed = true)
+    private val sessionDao = mockk<SessionDao>(relaxed = true)
+    private val metricsDao = mockk<PerformanceMetricsDao>(relaxed = true)
     private val database = mockk<AppDatabase>(relaxed = true)
     private val firestore = mockk<FirebaseFirestore>(relaxed = true)
     private val auth = mockk<FirebaseAuth>(relaxed = true)
@@ -34,6 +37,8 @@ class SrsLogicTest {
             database,
             questionDao,
             performanceDao,
+            sessionDao,
+            metricsDao,
             firestore,
             auth,
             context
