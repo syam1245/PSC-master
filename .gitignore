@@ -1,38 +1,53 @@
 # ============================================================
-# PSCmaster .gitignore
+# PSC-Master Optimized .gitignore
 # ============================================================
 
-# ---------- Built / generated outputs ----------
-*.iml
+# ---------- Android / Gradle ----------
 .gradle/
-/build/
-/app/build/
+build/
+/*/build/
 /captures/
 .externalNativeBuild/
 .cxx/
+*.apk
+*.aar
+*.bundle
 
-# ---------- IDE-specific ----------
+# ---------- IDE Specific (Android Studio / IntelliJ / VS Code) ----------
 .idea/
+*.iml
+.idea/modules.xml
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/assetWizardSettings.xml
+.idea/navEditor.xml
+.idea/caches/
 .kotlin/
+.vscode/
+
+# ---------- Secrets & Credentials (CRITICAL) ----------
+local.properties
+/app/google-services.json
+/app/google-services*.json
+secrets.properties
+*.jks
+*.keystore
+keystore.properties
 
 # ---------- OS-specific ----------
 .DS_Store
 Thumbs.db
 *.swp
 *~
+executable.stackdump
 
-# ---------- API Keys & Secrets ----------
-# local.properties holds SDK path + API keys (Gemini, Groq, etc.)
-local.properties
-
-# Firebase config — contains project API key & identifiers
-app/google-services.json
-
-# Keystore files (signing keys)
-*.jks
-*.keystore
-keystore.properties
-
-# ---------- Misc ----------
+# ---------- Misc / Analysis ----------
 *.hprof
+*.pyc
 *.log
+.navigation/
+
+# ---------- Gradle Wrapper (Optional) ----------
+# Some prefer to keep this, but if you want a clean repo:
+# !gradle/wrapper/gradle-wrapper.jar
+# !gradle/wrapper/gradle-wrapper.properties
