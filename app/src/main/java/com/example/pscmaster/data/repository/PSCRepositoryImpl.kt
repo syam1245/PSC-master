@@ -58,10 +58,11 @@ class PSCRepositoryImpl @Inject constructor(
     private val srsIntervals = listOf(1L, 3L, 7L, 14L, 30L, 60L, 120L)
 
     override suspend fun addQuestion(question: Question): Boolean {
-        val id = questionDao.insertQuestion(question)
+        val updatedQuestion = question.copy(timestamp = System.currentTimeMillis())
+        val id = questionDao.insertQuestion(updatedQuestion)
         if (id != -1L) {
             sessionDao.upsertBadgeState(QuestionBadgeState(questionId = id, state = QuestionBadgeState.STATE_UNSEEN))
-            pushQuestionToFirebase(question.copy(id = id))
+            pushQuestionToFirebase(updatedQuestion.copy(id = id))
         }
         return id != -1L
     }
@@ -69,7 +70,8 @@ class PSCRepositoryImpl @Inject constructor(
     private fun pushQuestionToFirebase(question: Question) {
         repositoryScope.launch {
             try {
-                if (auth.currentUser != null) {
+                val user = auth.currentUser
+                if (user != null) {
                     val docId = question.questionText.toStableId()
                     firestore.collection("shared_questions").document(docId)
                         .set(question, SetOptions.merge())
@@ -81,8 +83,12 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override suspend fun updateQuestion(question: Question) {
-        questionDao.updateQuestion(question)
-        pushQuestionToFirebase(question)
+        val updatedQuestion = question.copy(
+            version = question.version + 1,
+            timestamp = System.currentTimeMillis()
+        )
+        questionDao.updateQuestion(updatedQuestion)
+        pushQuestionToFirebase(updatedQuestion)
     }
 
     override fun getAllQuestions(): Flow<List<Question>> {
@@ -101,8 +107,11 @@ class PSCRepositoryImpl @Inject constructor(
         questionDao.deleteQuestion(question)
         repositoryScope.launch {
             try {
-                val docId = question.questionText.toStableId()
-                firestore.collection("shared_questions").document(docId).delete()
+                val user = auth.currentUser
+                if (user != null) {
+                    val docId = question.questionText.toStableId()
+                    firestore.collection("shared_questions").document(docId).delete()
+                }
             } catch (e: Exception) {
                 Log.e("FirebaseSync", "Auto-delete failed", e)
             }
@@ -113,13 +122,17 @@ class PSCRepositoryImpl @Inject constructor(
         questionDao.deleteQuestions(questions)
         repositoryScope.launch {
             try {
-                val batch = firestore.batch()
-                questions.forEach { question ->
-                    val docId = question.questionText.toStableId()
-                    val docRef = firestore.collection("shared_questions").document(docId)
-                    batch.delete(docRef)
+                val user = auth.currentUser
+                if (user != null) {
+                    val batch = firestore.batch()
+                    val collection = firestore.collection("shared_questions")
+                    questions.forEach { question ->
+                        val docId = question.questionText.toStableId()
+                        val docRef = collection.document(docId)
+                        batch.delete(docRef)
+                    }
+                    batch.commit().await()
                 }
-                batch.commit().await()
             } catch (e: Exception) {
                 Log.e("FirebaseSync", "Bulk delete failed", e)
             }
@@ -188,9 +201,10 @@ class PSCRepositoryImpl @Inject constructor(
             }
         ))
         
-        // 2. Update Question (Content Versioning)
+        // 2. Update Question (Content Versioning + Timestamp)
         val updatedQuestion = question.copy(
-            version = question.version + 1
+            version = question.version + 1,
+            timestamp = System.currentTimeMillis()
         )
         questionDao.updateQuestion(updatedQuestion)
         pushQuestionToFirebase(updatedQuestion)
@@ -351,7 +365,9 @@ class PSCRepositoryImpl @Inject constructor(
             }
 
             if (questionsToInsert.isNotEmpty()) {
-                val results = questionDao.bulkInsert(questionsToInsert)
+                val now = System.currentTimeMillis()
+                val preparedQuestions = questionsToInsert.map { it.copy(timestamp = now) }
+                val results = questionDao.bulkInsert(preparedQuestions)
                 val addedCount = results.count { it != -1L }
                 
                 val newBadgeStates = results.filter { it != -1L }.map { id ->
@@ -502,49 +518,92 @@ class PSCRepositoryImpl @Inject constructor(
     }
 
     override suspend fun syncToFirebase(): Result<Unit> = withContext(Dispatchers.IO) {
+        var uploadError: Exception? = null
+        var downloadError: Exception? = null
+
         try {
-            val userId = auth.currentUser?.uid ?: return@withContext Result.failure(Exception("User not logged in"))
+            val user = auth.currentUser ?: return@withContext Result.failure(Exception("User not logged in"))
+            
+            // Force refresh token
+            try { user.getIdToken(true).await() } catch (e: Exception) { Log.w("FirebaseSync", "Token refresh failed", e) }
+
+            val questionsRef = firestore.collection("shared_questions")
 
             withTimeout(60000L) {
-                val lastSync = syncPrefs.getLong("last_sync_timestamp", 0L)
-                val localQuestions = questionDao.getAllQuestionsList().filter { it.timestamp > lastSync }
-                
-                if (localQuestions.isNotEmpty()) {
-                    val chunks = localQuestions.chunked(400)
-                    chunks.forEach { chunk ->
-                        val batch = firestore.batch()
-                        chunk.forEach { question ->
-                            val docId = question.questionText.toStableId()
-                            val docRef = firestore.collection("shared_questions").document(docId)
-                            batch.set(docRef, question, SetOptions.merge())
+                // 1. Upload local changes
+                val lastUpload = syncPrefs.getLong("last_upload_timestamp_v2", 0L)
+                try {
+                    val localQuestions = questionDao.getQuestionsUpdatedAfter(lastUpload)
+                    
+                    if (localQuestions.isNotEmpty()) {
+                        var latestUploadedTs = lastUpload
+                        val chunks = localQuestions.chunked(400)
+                        chunks.forEach { chunk ->
+                            val batch = firestore.batch()
+                            chunk.forEach { question ->
+                                val docId = question.questionText.toStableId()
+                                val docRef = questionsRef.document(docId)
+                                batch.set(docRef, question, SetOptions.merge())
+                                if (question.timestamp > latestUploadedTs) latestUploadedTs = question.timestamp
+                            }
+                            batch.commit().await()
                         }
-                        batch.commit().await()
+                        syncPrefs.edit().putLong("last_upload_timestamp_v2", latestUploadedTs).apply()
                     }
+                } catch (e: Exception) {
+                    Log.e("FirebaseSync", "Upload failed", e)
+                    uploadError = e
                 }
 
-                val remoteQuery = firestore.collection("shared_questions")
-                    .whereGreaterThan("timestamp", lastSync)
-                    .orderBy("timestamp", Query.Direction.ASCENDING)
-                
-                val remoteQuestions = remoteQuery.get().await()
-                remoteQuestions.documents.forEach { doc ->
-                    val question = doc.toObject(Question::class.java)
-                    if (question != null) {
-                        val existing = questionDao.getQuestionByText(question.questionText)
-                        if (existing == null) {
-                            questionDao.insertQuestion(question.copy(id = 0))
-                        } else if (question.version > existing.version) {
-                            // Version-based conflict resolution
-                            questionDao.updateQuestion(question.copy(id = existing.id))
+                // 2. Download remote changes
+                val lastDownload = syncPrefs.getLong("last_download_timestamp_v2", 0L)
+                try {
+                    val remoteQuery = if (lastDownload == 0L) {
+                        questionsRef
+                    } else {
+                        questionsRef
+                            .whereGreaterThan("timestamp", lastDownload)
+                            .orderBy("timestamp", Query.Direction.ASCENDING)
+                    }
+                    
+                    val remoteQuestions = remoteQuery.get().await()
+                    var maxTimestamp = lastDownload
+
+                    remoteQuestions.documents.forEach { doc ->
+                        val question = doc.toObject(Question::class.java)
+                        if (question != null) {
+                            if (question.timestamp > maxTimestamp) {
+                                maxTimestamp = question.timestamp
+                            }
+                            val existing = questionDao.getQuestionByText(question.questionText)
+                            if (existing == null) {
+                                questionDao.insertQuestion(question.copy(id = 0))
+                            } else if (question.version > existing.version) {
+                                questionDao.updateQuestion(question.copy(id = existing.id))
+                            }
                         }
                     }
+                    if (maxTimestamp > lastDownload) {
+                        syncPrefs.edit().putLong("last_download_timestamp_v2", maxTimestamp).apply()
+                        syncPrefs.edit().putLong("last_sync_timestamp", maxTimestamp).apply() // Keep legacy key aligned
+                    }
+                } catch (e: Exception) {
+                    Log.e("FirebaseSync", "Download failed. Check if Firestore Index is created.", e)
+                    downloadError = e
                 }
-                
-                syncPrefs.edit().putLong("last_sync_timestamp", System.currentTimeMillis()).apply()
             }
+
+            if (uploadError != null && downloadError != null) {
+                return@withContext Result.failure(Exception("Sync failed: Upload(${uploadError?.message}), Download(${downloadError?.message})"))
+            } else if (uploadError != null) {
+                return@withContext Result.failure(Exception("Download OK, but Upload failed: ${uploadError?.message}"))
+            } else if (downloadError != null) {
+                 return@withContext Result.failure(Exception("Upload OK, but Download failed: ${downloadError?.message}"))
+            }
+            
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("FirebaseSync", "Sync failed: ${e.message}", e)
+            Log.e("FirebaseSync", "General sync error", e)
             Result.failure(e)
         }
     }
@@ -552,9 +611,11 @@ class PSCRepositoryImpl @Inject constructor(
     override fun startRealtimeSync() {
         syncListenerRegistration?.remove()
         
-        val lastSync = syncPrefs.getLong("last_sync_timestamp", 0L)
+        val user = auth.currentUser ?: return
+        val lastDownload = syncPrefs.getLong("last_download_timestamp_v2", 0L)
+        
         syncListenerRegistration = firestore.collection("shared_questions")
-            .whereGreaterThan("timestamp", lastSync)
+            .whereGreaterThan("timestamp", lastDownload)
             .addSnapshotListener { snapshots, e ->
                 if (e != null) {
                     Log.w("FirebaseSync", "Listen failed.", e)
@@ -566,23 +627,27 @@ class PSCRepositoryImpl @Inject constructor(
                         try {
                             val question = dc.document.toObject(Question::class.java) ?: return@launch
                             when (dc.type) {
-                                com.google.firebase.firestore.DocumentChange.Type.ADDED -> {
-                                    questionDao.insertQuestion(question.copy(id = 0))
-                                }
+                                com.google.firebase.firestore.DocumentChange.Type.ADDED,
                                 com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                                val local = questionDao.getQuestionByText(question.questionText)
-                                if (local != null) {
-                                    if (question.version > local.version) {
-                                        questionDao.updateQuestion(question.copy(id = local.id))
+                                    val local = questionDao.getQuestionByText(question.questionText)
+                                    if (local != null) {
+                                        if (question.version > local.version) {
+                                            questionDao.updateQuestion(question.copy(id = local.id))
+                                        }
+                                    } else {
+                                        questionDao.insertQuestion(question.copy(id = 0))
                                     }
-                                } else {
-                                    questionDao.insertQuestion(question.copy(id = 0))
-                                }
                                 }
                                 com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
                                     val local = questionDao.getQuestionByText(question.questionText)
                                     if (local != null) questionDao.deleteQuestion(local)
                                 }
+                            }
+                            
+                            // Update download timestamp
+                            val currentLastDownload = syncPrefs.getLong("last_download_timestamp_v2", 0L)
+                            if (question.timestamp > currentLastDownload) {
+                                syncPrefs.edit().putLong("last_download_timestamp_v2", question.timestamp).apply()
                             }
                         } catch (e: Exception) {
                             Log.e("FirebaseSync", "Real-time update failed", e)
@@ -593,13 +658,8 @@ class PSCRepositoryImpl @Inject constructor(
     }
     override fun isNetworkAvailable(): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val networkCapabilities = connectivityManager.activeNetwork ?: return false
-        val actNw = connectivityManager.getNetworkCapabilities(networkCapabilities) ?: return false
-        return when {
-            actNw.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
-            actNw.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
-            actNw.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
-            else -> false
-        }
+        val nw = connectivityManager.activeNetwork ?: return false
+        val actNw = connectivityManager.getNetworkCapabilities(nw) ?: return false
+        return actNw.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }

@@ -64,6 +64,9 @@ class InputViewModel @Inject constructor(
             isLoggedIn = user != null,
             userEmail = user?.email ?: user?.uid ?: "Guest"
         )
+        if (user != null) {
+            repository.startRealtimeSync()
+        }
     }
 
     fun signInAnonymously() {
@@ -72,6 +75,7 @@ class InputViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(isSyncing = true)
                 auth.signInAnonymously().await()
                 checkAuthStatus()
+                repository.startRealtimeSync()
                 _uiState.value = _uiState.value.copy(
                     isSyncing = false,
                     infoMessage = "Logged in successfully!"

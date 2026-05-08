@@ -15,7 +15,7 @@ import com.example.pscmaster.data.entity.*
         QuestionBadgeState::class,
         UserPerformanceMetrics::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -30,6 +30,12 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE user_performance_metrics ADD COLUMN isShownInCycle INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_user_performance_metrics_isShownInCycle ON user_performance_metrics (isShownInCycle)")
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_questions_timestamp ON questions (timestamp)")
             }
         }
         val MIGRATION_1_2 = object : Migration(1, 2) {

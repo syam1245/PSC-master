@@ -9,7 +9,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["questionText"], unique = true),
         Index(value = ["subject"]),
-        Index(value = ["subjectTag"])
+        Index(value = ["subjectTag"]),
+        Index(value = ["timestamp"])
     ]
 )
 data class Question(

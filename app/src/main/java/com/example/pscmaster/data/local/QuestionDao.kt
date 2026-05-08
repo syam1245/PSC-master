@@ -109,8 +109,9 @@ interface QuestionDao {
     suspend fun resetCycleCurrentSubject(subject: String?)
 
     @Query("""
-        INSERT INTO user_performance_metrics (questionId, isShownInCycle)
-        VALUES (:id, 1)
+        INSERT INTO user_performance_metrics 
+        (questionId, isShownInCycle, totalAttempts, correctAttempts, lastAttemptTimestamp, averageTimeSpent, difficultyFlag, consecutiveCorrect, easeFactor, lastIntervalDays, nextReviewTimestamp, intervalIndex)
+        VALUES (:id, 1, 0, 0, 0, 0, 0, 0, 2.5, 0, 0, 0)
         ON CONFLICT(questionId) DO UPDATE SET isShownInCycle = 1
     """)
     suspend fun upsertShownInCycle(id: Long)
@@ -155,4 +156,8 @@ interface QuestionDao {
         ORDER BY up.timestamp DESC
     """)
     suspend fun getQuestionsWithMistakes(): List<QuestionWithMetadata>
+
+    @Transaction
+    @Query("SELECT * FROM questions WHERE timestamp > :lastSync")
+    suspend fun getQuestionsUpdatedAfter(lastSync: Long): List<Question>
 }

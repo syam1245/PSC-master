@@ -60,7 +60,7 @@ fun QuizScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = {
-                        if (uiState.isConfiguring) onNavigateBack() else viewModel.resetToConfig()
+                        onNavigateBack()
                     }) {
                         Icon(
                             if (uiState.isConfiguring) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack, 
@@ -92,7 +92,7 @@ fun QuizScreen(
                     score = uiState.score,
                     total = uiState.questions.size,
                     answeredCount = uiState.answeredIndices.size,
-                    onBack = { viewModel.resetToConfig() }
+                    onBack = { onNavigateBack() }
                 )
             } else if (uiState.questions.isEmpty()) {
                 EmptyQuizState(onBack = { viewModel.resetToConfig() })
